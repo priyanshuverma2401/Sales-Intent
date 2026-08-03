@@ -1,0 +1,32 @@
+{
+  "name": "salesmotion-backend",
+  "version": "1.0.0",
+  "description": "Sales Intelligence Platform Backend",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.4.0",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "groq-sdk": "^0.3.2",
+    "html-to-text": "^9.0.5",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.0.0",
+    "node-cron": "^3.0.2",
+    "pdfkit": "^0.13.0",
+    "rss-parser": "^3.13.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "nodemon": "^2.0.22"
+  }
+}

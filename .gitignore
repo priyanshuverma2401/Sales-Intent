@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+# backend/.env holds live Groq / NewsAPI / Finnhub keys, the MongoDB Atlas
+# connection string and the JWT secret. Never commit it - .env.example carries
+# the shape of the file instead.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.npm/
+.yarn/
+.pnp.*
+
+# Python virtualenv left over from an earlier iteration
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+build/
+dist/
+out/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Runtime artefacts
+# ---------------------------------------------------------------------------
+# Generated report PDFs. reportGenerator recreates this directory on boot, so
+# nothing breaks when it is absent from a fresh clone.
+backend/reports/
+*.pdf
+
+# Legacy SQLite store, superseded by MongoDB + Supabase
+backend/database/*.db
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# Logs & diagnostics
+# ---------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pids/
+*.pid
+*.seed
+
+# ---------------------------------------------------------------------------
+# Test & cache
+# ---------------------------------------------------------------------------
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# ---------------------------------------------------------------------------
+# Editors
+# ---------------------------------------------------------------------------
+# Shared workspace settings are worth committing; personal state is not.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

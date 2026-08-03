@@ -1,0 +1,12 @@
+{
+  // Use the TypeScript that actually compiles this project (4.9.5, pinned by
+  // react-scripts) instead of the newer copy bundled with VS Code.
+  //
+  // Without this the editor type-checks with a much later TypeScript and reports
+  // problems the real build does not have - notably that
+  // "moduleResolution": "node" in frontend/tsconfig.json is deprecated. That
+  // option is valid in 4.9.5, and the two fixes the message suggests
+  // ("bundler" / "ignoreDeprecations") both need TS 5.0+ and would break the build.
+  "typescript.tsdk": "frontend/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}

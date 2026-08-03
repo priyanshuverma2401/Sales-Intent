@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    @apply bg-slate-50 text-ink antialiased;
+  }
+
+  /* One consistent focus ring across every interactive element */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    @apply ring-2 ring-brand-500/40 ring-offset-2 ring-offset-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* --- Surfaces --- */
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+  }
+  .card-pad {
+    @apply p-5 sm:p-6;
+  }
+
+  /* --- Buttons --- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold
+           transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-md {
+    @apply h-10 px-4;
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-[13px];
+  }
+  .btn-lg {
+    @apply h-11 px-5;
+  }
+  .btn-primary {
+    @apply bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
+  }
+  .btn-secondary {
+    @apply border border-slate-200 bg-white text-ink-soft hover:bg-slate-50 hover:text-ink;
+  }
+  .btn-ghost {
+    @apply text-ink-muted hover:bg-slate-100 hover:text-ink;
+  }
+  .btn-danger {
+    @apply border border-red-200 bg-white text-red-600 hover:bg-red-50;
+  }
+
+  /* --- Forms --- */
+  .label {
+    @apply mb-1.5 block text-[13px] font-semibold text-ink-soft;
+  }
+  .hint {
+    @apply mt-1.5 text-xs leading-relaxed text-ink-muted;
+  }
+  .input {
+    @apply block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink
+           placeholder:text-ink-faint focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+  }
+  textarea.input {
+    @apply leading-relaxed;
+  }
+
+  /* --- Badges --- */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-2xs font-semibold;
+  }
+  .badge-neutral {
+    @apply bg-slate-100 text-slate-600;
+  }
+  .badge-brand {
+    @apply bg-brand-50 text-brand-700;
+  }
+  .badge-green {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+  .badge-amber {
+    @apply bg-amber-50 text-amber-700;
+  }
+  .badge-red {
+    @apply bg-red-50 text-red-700;
+  }
+
+  /* --- Report prose --- */
+  .report-body {
+    @apply text-[14.5px] leading-[1.65] text-ink-soft;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Printing the report view should produce something usable even without the
+   PDF export: drop the chrome and keep sections whole. */
+@media print {
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .card {
+    border-color: #e2e8f0;
+    box-shadow: none;
+  }
+}
