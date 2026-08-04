@@ -82,3 +82,20 @@ exports.authorize = (...roles) => {
     next();
   };
 };
+
+// Two tiers of access:
+//   owner  - runs the tenant: edits the company profile, deletes any report
+//   member - reads everything the tenant produced, edits nothing it did not create
+// `admin` predates that split and sits with owner so existing admins keep their
+// access; drop it from this list to collapse the model to exactly two roles.
+const MANAGER_ROLES = ['owner', 'admin'];
+
+exports.MANAGER_ROLES = MANAGER_ROLES;
+exports.isManager = user => MANAGER_ROLES.includes(user?.role);
+
+// Same tenant, and the tenant is actually known. Reports created before
+// organizationId was stored fall back to ownership, handled by the callers.
+exports.sameOrg = (doc, req) => {
+  const orgId = req.organization?._id?.toString();
+  return Boolean(orgId && doc?.organizationId?.toString() === orgId);
+};

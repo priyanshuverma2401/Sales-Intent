@@ -26,6 +26,11 @@ interface ReportSummary {
   fastFacts?: { industry?: string; headquarters?: string };
   generatedAt: string;
   pdfFileName?: string;
+  // Reports are listed org-wide, so each row states who wrote it and whether
+  // this viewer is allowed to remove it. The server decides both.
+  author?: { _id: string; name: string; email: string } | null;
+  isMine?: boolean;
+  canDelete?: boolean;
 }
 
 export default function ReportsPage() {
@@ -92,7 +97,7 @@ export default function ReportsPage() {
       <PageHeader
         eyebrow="Intelligence"
         title="Reports"
-        description="Account briefs written through your capabilities and pitch keywords."
+        description="Every brief your team has generated, newest first."
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
             New report
@@ -154,6 +159,11 @@ export default function ReportsPage() {
                           .filter(Boolean)
                           .join(' · ') || 'Account brief'}
                       </p>
+                      {report.author && !report.isMine && (
+                        <p className="mt-1 truncate text-2xs text-ink-faint">
+                          Researched by {report.author.name}
+                        </p>
+                      )}
                     </div>
 
                     {done && report.score?.value ? (
@@ -236,12 +246,12 @@ export default function ReportsPage() {
                         </Button>
                       </>
                     )}
-                    {report.status !== 'pending' && (
+                    {report.status !== 'pending' && report.canDelete !== false && (
                       <button
                         onClick={() => remove(report)}
                         disabled={busy}
                         className="rounded-lg p-1.5 text-ink-faint transition hover:bg-red-50 hover:text-red-600"
-                        title="Delete report"
+                        title={report.isMine ? 'Delete report' : 'Delete report (owner)'}
                       >
                         <Trash2 size={14} />
                       </button>
