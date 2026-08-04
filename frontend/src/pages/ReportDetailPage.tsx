@@ -22,14 +22,25 @@ import {
   SubSection,
 } from '../components/ReportSections';
 
-const TABS = [
-  { id: 'brief', label: 'What You Need To Know' },
-  { id: 'research', label: 'Research & Analysis' },
-  { id: 'value', label: 'Value' },
-  { id: 'sources', label: 'Sources' },
+// The report reads as one continuous document, the same order as the exported
+// PDF. It used to be tabbed, which meant opening a report showed only the first
+// of four panels - roughly a quarter of what the PDF held - and Print emitted
+// just the active tab. These are jump links now, not tabs: everything is on the
+// page and this is only a fast way down it.
+const CHAPTERS = [
+  {
+    id: 'ch-brief',
+    label: 'What You Need To Know',
+    blurb: 'The brief you read in the five minutes before a call.',
+  },
+  {
+    id: 'ch-research',
+    label: 'Research & Analysis',
+    blurb: 'How the account works, where it is heading, what stands in the way.',
+  },
+  { id: 'ch-value', label: 'Value', blurb: 'The argument you make in the room.' },
+  { id: 'ch-sources', label: 'Sources', blurb: 'Every reference cited above.' },
 ] as const;
-
-type TabId = (typeof TABS)[number]['id'];
 
 function money(value?: number) {
   if (!value) return null;
@@ -47,7 +58,7 @@ export default function ReportDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
-  const [tab, setTab] = useState<TabId>('brief');
+  const [activeChapter, setActiveChapter] = useState<string>(CHAPTERS[0].id);
 
   const load = useCallback(
     async (silent = false) => {
@@ -76,6 +87,29 @@ export default function ReportDetailPage() {
     const timer = setInterval(() => load(true), 4000);
     return () => clearInterval(timer);
   }, [report?.status, load]);
+
+  // Keeps the jump bar showing where you are on what is now a long page.
+  useEffect(() => {
+    if (report?.status !== 'complete') return;
+
+    const targets = CHAPTERS.map((c) => document.getElementById(c.id)).filter(
+      (el): el is HTMLElement => Boolean(el)
+    );
+    if (!targets.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const top = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (top) setActiveChapter(top.target.id);
+      },
+      { rootMargin: '-96px 0px -70% 0px' }
+    );
+
+    targets.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [report?.status]);
 
   const sources = useMemo(() => report?.sources || [], [report]);
 
@@ -351,237 +385,231 @@ export default function ReportDetailPage() {
         </div>
       </Card>
 
-      {/* ---------------- Tabs ---------------- */}
+      {/* ---------------- Jump links ---------------- */}
       <div className="no-print sticky top-0 z-20 -mx-6 mb-5 border-b border-slate-200 bg-slate-50/90 px-6 backdrop-blur">
         <nav className="flex gap-1 overflow-x-auto scrollbar-none">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+          {CHAPTERS.map((c) => (
+            <a
+              key={c.id}
+              href={`#${c.id}`}
               className={cx(
                 'whitespace-nowrap border-b-2 px-3.5 py-3 text-sm font-semibold transition',
-                tab === t.id
+                activeChapter === c.id
                   ? 'border-brand-600 text-brand-700'
                   : 'border-transparent text-ink-muted hover:text-ink'
               )}
             >
-              {t.label}
-            </button>
+              {c.label}
+            </a>
           ))}
         </nav>
       </div>
 
-      {/* ---------------- Panels ---------------- */}
+      {/* ---------------- Report body ---------------- */}
       <div className="space-y-5">
-        {(tab === 'brief' || false) && (
-          <>
-            <ReportSection
-              id="key-insights"
-              title="Key Insights"
-              description="The developments that matter most for this pitch."
-            >
-              <InsightList items={brief.keyInsights} sources={sources} tone="amber" />
-            </ReportSection>
+        <Chapter {...CHAPTERS[0]} />
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <ReportSection id="opportunities" title="Opportunities">
-                <InsightList items={brief.opportunities} sources={sources} tone="green" />
-              </ReportSection>
+        <ReportSection
+          id="key-insights"
+          title="Key Insights"
+          description="The developments that matter most for this pitch."
+        >
+          <InsightList items={brief.keyInsights} sources={sources} tone="amber" />
+        </ReportSection>
 
-              <ReportSection id="challenges" title="Challenges">
-                <InsightList items={brief.challenges} sources={sources} tone="red" />
-              </ReportSection>
-            </div>
-
-            <ReportSection id="people" title="People Updates">
-              <InsightList items={brief.peopleUpdates} sources={sources} tone="purple" />
-            </ReportSection>
-
-            <ReportSection id="news" title="Top News">
-              <NewsList items={brief.topNews} sources={sources} />
-            </ReportSection>
-
-            <ReportSection
-              id="talking-points"
-              title="Talking Points"
-              description="Openers you can say out loud on the first call."
-            >
-              <InsightList items={brief.talkingPoints} sources={sources} tone="brand" />
-            </ReportSection>
-
-            {brief.executivePerspective?.length ? (
-              <ReportSection id="quotes" title="Executive Perspective">
-                <div className="space-y-3">
-                  {brief.executivePerspective.map((q: any, i: number) => (
-                    <QuoteCard key={i} {...q} />
-                  ))}
-                </div>
-              </ReportSection>
-            ) : null}
-          </>
-        )}
-
-        {tab === 'research' && (
-          <>
-            <ReportSection id="insights" title="Insights">
-              <SubSection title="Company Overview">
-                <InsightList items={research.companyOverview} sources={sources} />
-              </SubSection>
-              <SubSection title="Key People Changes" tone="purple">
-                <InsightList items={research.keyPeopleChanges} sources={sources} tone="purple" />
-              </SubSection>
-              <SubSection title="Key Projects" tone="teal">
-                <InsightList items={research.keyProjects} sources={sources} tone="teal" />
-              </SubSection>
-              <SubSection title="Aspirations">
-                <InsightList items={research.aspirations} sources={sources} />
-              </SubSection>
-              <SubSection title="Business Goals">
-                <InsightList items={research.businessGoals} sources={sources} />
-              </SubSection>
-              <SubSection title="Opportunities" tone="green">
-                <InsightList items={research.opportunities} sources={sources} tone="green" />
-              </SubSection>
-              <SubSection title="Macroeconomic Perspective" tone="slate">
-                <InsightList items={research.macroPerspective} sources={sources} tone="slate" />
-              </SubSection>
-              <SubSection title="Recent Press Announcements" tone="teal">
-                <InsightList items={research.recentPress} sources={sources} tone="teal" />
-              </SubSection>
-            </ReportSection>
-
-            <ReportSection id="business-model" title="Business Model">
-              <SubSection title="Revenue Streams">
-                <InsightList items={research.businessModel?.revenueStreams} sources={sources} />
-              </SubSection>
-              <SubSection title="Go-to-Market Strategy">
-                <InsightList items={research.businessModel?.goToMarket} sources={sources} />
-              </SubSection>
-              <SubSection title="Ideal Customer Profile">
-                <InsightList
-                  items={research.businessModel?.idealCustomerProfile}
-                  sources={sources}
-                />
-              </SubSection>
-            </ReportSection>
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <ReportSection id="initiatives" title="Strategic Initiatives">
-                <InsightList items={research.strategicInitiatives} sources={sources} />
-              </ReportSection>
-              <ReportSection id="financials" title="Financials">
-                <InsightList items={research.financials} sources={sources} tone="teal" />
-              </ReportSection>
-            </div>
-
-            <ReportSection
-              id="swot"
-              title="SWOT Analysis"
-              description="Read from your angle: can this account buy, and what stands in the way?"
-            >
-              <div className="grid gap-6 sm:grid-cols-2">
-                <SubSection title="Strengths" tone="green">
-                  <InsightList items={research.swot?.strengths} sources={sources} tone="green" />
-                </SubSection>
-                <SubSection title="Weaknesses" tone="red">
-                  <InsightList items={research.swot?.weaknesses} sources={sources} tone="red" />
-                </SubSection>
-                <SubSection title="Opportunities" tone="brand">
-                  <InsightList items={research.swot?.opportunities} sources={sources} tone="brand" />
-                </SubSection>
-                <SubSection title="Threats" tone="amber">
-                  <InsightList items={research.swot?.threats} sources={sources} tone="amber" />
-                </SubSection>
-              </div>
-            </ReportSection>
-          </>
-        )}
-
-        {tab === 'value' && (
-          <>
-            <ReportSection
-              id="three-whys"
-              title="Three Whys"
-              description="The argument you make in the room."
-            >
-              <SubSection title="Why Change" tone="purple">
-                <InsightList items={value.whyChange} sources={sources} tone="purple" />
-              </SubSection>
-              <SubSection title="Why Now" tone="amber">
-                <InsightList items={value.whyNow} sources={sources} tone="amber" />
-              </SubSection>
-              <SubSection title="Why You" tone="green">
-                <InsightList items={value.whyYou} sources={sources} tone="green" />
-              </SubSection>
-            </ReportSection>
-
-            <ReportSection id="value-pyramid" title="Value Pyramid">
-              <SubSection title="Company Goals">
-                <InsightList items={value.valuePyramid?.companyGoals} sources={sources} />
-              </SubSection>
-              <SubSection title="Business Strategy">
-                <InsightList items={value.valuePyramid?.businessStrategy} sources={sources} />
-              </SubSection>
-              <SubSection title="Challenges and Obstacles" tone="red">
-                <InsightList
-                  items={value.valuePyramid?.challengesObstacles}
-                  sources={sources}
-                  tone="red"
-                />
-              </SubSection>
-              <SubSection title="Value Paths" tone="teal">
-                <InsightList items={value.valuePyramid?.valuePaths} sources={sources} tone="teal" />
-              </SubSection>
-            </ReportSection>
-
-            {value.valuePropositions?.length ? (
-              <ReportSection
-                id="value-props"
-                title="Value Proposition Ideas"
-                description="Ready to lift into a deck or an email."
-              >
-                <div className="space-y-4">
-                  {value.valuePropositions.map((prop: any, i: number) => (
-                    <div
-                      key={i}
-                      className="print-block rounded-lg border border-slate-200 bg-slate-50/60 p-4"
-                    >
-                      <h4 className="mb-1.5 text-sm font-bold text-ink">
-                        <span className="mr-2 text-brand-600">{i + 1}.</span>
-                        {prop.title}
-                      </h4>
-                      <p className="report-body">{prop.body}</p>
-                    </div>
-                  ))}
-                </div>
-              </ReportSection>
-            ) : null}
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <ReportSection
-                id="hypotheses"
-                title="Value Hypothesis"
-                description="Bets to test on the call."
-              >
-                <InsightList items={value.hypotheses} sources={sources} tone="purple" />
-              </ReportSection>
-
-              <ReportSection id="pov" title="Point of View">
-                <InsightList items={value.pointOfView} sources={sources} tone="brand" />
-              </ReportSection>
-            </div>
-          </>
-        )}
-
-        {tab === 'sources' && (
-          <ReportSection
-            id="sources"
-            title="Sources"
-            description={`${sources.length} references gathered for this report.`}
-          >
-            <SourcesList sources={sources} />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ReportSection id="opportunities" title="Opportunities">
+            <InsightList items={brief.opportunities} sources={sources} tone="green" />
           </ReportSection>
-        )}
+
+          <ReportSection id="challenges" title="Challenges">
+            <InsightList items={brief.challenges} sources={sources} tone="red" />
+          </ReportSection>
+        </div>
+
+        <ReportSection id="people" title="People Updates">
+          <InsightList items={brief.peopleUpdates} sources={sources} tone="purple" />
+        </ReportSection>
+
+        <ReportSection id="news" title="Top News">
+          <NewsList items={brief.topNews} sources={sources} />
+        </ReportSection>
+
+        <ReportSection
+          id="talking-points"
+          title="Talking Points"
+          description="Openers you can say out loud on the first call."
+        >
+          <InsightList items={brief.talkingPoints} sources={sources} tone="brand" />
+        </ReportSection>
+
+        {brief.executivePerspective?.length ? (
+          <ReportSection id="quotes" title="Executive Perspective">
+            <div className="space-y-3">
+              {brief.executivePerspective.map((q: any, i: number) => (
+                <QuoteCard key={i} {...q} />
+              ))}
+            </div>
+          </ReportSection>
+        ) : null}
+
+        <Chapter {...CHAPTERS[1]} />
+
+        <ReportSection id="insights" title="Insights">
+          <SubSection title="Company Overview">
+            <InsightList items={research.companyOverview} sources={sources} />
+          </SubSection>
+          <SubSection title="Key People Changes" tone="purple">
+            <InsightList items={research.keyPeopleChanges} sources={sources} tone="purple" />
+          </SubSection>
+          <SubSection title="Key Projects" tone="teal">
+            <InsightList items={research.keyProjects} sources={sources} tone="teal" />
+          </SubSection>
+          <SubSection title="Aspirations">
+            <InsightList items={research.aspirations} sources={sources} />
+          </SubSection>
+          <SubSection title="Business Goals">
+            <InsightList items={research.businessGoals} sources={sources} />
+          </SubSection>
+          <SubSection title="Opportunities" tone="green">
+            <InsightList items={research.opportunities} sources={sources} tone="green" />
+          </SubSection>
+          <SubSection title="Macroeconomic Perspective" tone="slate">
+            <InsightList items={research.macroPerspective} sources={sources} tone="slate" />
+          </SubSection>
+          <SubSection title="Recent Press Announcements" tone="teal">
+            <InsightList items={research.recentPress} sources={sources} tone="teal" />
+          </SubSection>
+        </ReportSection>
+
+        <ReportSection id="business-model" title="Business Model">
+          <SubSection title="Revenue Streams">
+            <InsightList items={research.businessModel?.revenueStreams} sources={sources} />
+          </SubSection>
+          <SubSection title="Go-to-Market Strategy">
+            <InsightList items={research.businessModel?.goToMarket} sources={sources} />
+          </SubSection>
+          <SubSection title="Ideal Customer Profile">
+            <InsightList
+              items={research.businessModel?.idealCustomerProfile}
+              sources={sources}
+            />
+          </SubSection>
+        </ReportSection>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ReportSection id="initiatives" title="Strategic Initiatives">
+            <InsightList items={research.strategicInitiatives} sources={sources} />
+          </ReportSection>
+          <ReportSection id="financials" title="Financials">
+            <InsightList items={research.financials} sources={sources} tone="teal" />
+          </ReportSection>
+        </div>
+
+        <ReportSection
+          id="swot"
+          title="SWOT Analysis"
+          description="Read from your angle: can this account buy, and what stands in the way?"
+        >
+          <div className="grid gap-6 sm:grid-cols-2">
+            <SubSection title="Strengths" tone="green">
+              <InsightList items={research.swot?.strengths} sources={sources} tone="green" />
+            </SubSection>
+            <SubSection title="Weaknesses" tone="red">
+              <InsightList items={research.swot?.weaknesses} sources={sources} tone="red" />
+            </SubSection>
+            <SubSection title="Opportunities" tone="brand">
+              <InsightList items={research.swot?.opportunities} sources={sources} tone="brand" />
+            </SubSection>
+            <SubSection title="Threats" tone="amber">
+              <InsightList items={research.swot?.threats} sources={sources} tone="amber" />
+            </SubSection>
+          </div>
+        </ReportSection>
+
+        <Chapter {...CHAPTERS[2]} />
+
+        <ReportSection
+          id="three-whys"
+          title="Three Whys"
+          description="The argument you make in the room."
+        >
+          <SubSection title="Why Change" tone="purple">
+            <InsightList items={value.whyChange} sources={sources} tone="purple" />
+          </SubSection>
+          <SubSection title="Why Now" tone="amber">
+            <InsightList items={value.whyNow} sources={sources} tone="amber" />
+          </SubSection>
+          <SubSection title="Why You" tone="green">
+            <InsightList items={value.whyYou} sources={sources} tone="green" />
+          </SubSection>
+        </ReportSection>
+
+        <ReportSection id="value-pyramid" title="Value Pyramid">
+          <SubSection title="Company Goals">
+            <InsightList items={value.valuePyramid?.companyGoals} sources={sources} />
+          </SubSection>
+          <SubSection title="Business Strategy">
+            <InsightList items={value.valuePyramid?.businessStrategy} sources={sources} />
+          </SubSection>
+          <SubSection title="Challenges and Obstacles" tone="red">
+            <InsightList
+              items={value.valuePyramid?.challengesObstacles}
+              sources={sources}
+              tone="red"
+            />
+          </SubSection>
+          <SubSection title="Value Paths" tone="teal">
+            <InsightList items={value.valuePyramid?.valuePaths} sources={sources} tone="teal" />
+          </SubSection>
+        </ReportSection>
+
+        {value.valuePropositions?.length ? (
+          <ReportSection
+            id="value-props"
+            title="Value Proposition Ideas"
+            description="Ready to lift into a deck or an email."
+          >
+            <div className="space-y-4">
+              {value.valuePropositions.map((prop: any, i: number) => (
+                <div
+                  key={i}
+                  className="print-block rounded-lg border border-slate-200 bg-slate-50/60 p-4"
+                >
+                  <h4 className="mb-1.5 text-sm font-bold text-ink">
+                    <span className="mr-2 text-brand-600">{i + 1}.</span>
+                    {prop.title}
+                  </h4>
+                  <p className="report-body">{prop.body}</p>
+                </div>
+              ))}
+            </div>
+          </ReportSection>
+        ) : null}
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ReportSection
+            id="hypotheses"
+            title="Value Hypothesis"
+            description="Bets to test on the call."
+          >
+            <InsightList items={value.hypotheses} sources={sources} tone="purple" />
+          </ReportSection>
+
+          <ReportSection id="pov" title="Point of View">
+            <InsightList items={value.pointOfView} sources={sources} tone="brand" />
+          </ReportSection>
+        </div>
+
+        <Chapter {...CHAPTERS[3]} />
+
+        <ReportSection
+          id="sources"
+          title="Sources"
+          description={`${sources.length} references gathered for this report.`}
+        >
+          <SourcesList sources={sources} />
+        </ReportSection>
       </div>
 
       <footer className="no-print mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5 text-[13px] text-ink-muted">
@@ -593,6 +621,19 @@ export default function ReportDetailPage() {
           Back to accounts
         </Link>
       </footer>
+    </div>
+  );
+}
+
+// Divider between the four parts of the document. Gives the long scroll an
+// obvious structure, and gives the jump links something to anchor to.
+function Chapter({ id, label, blurb }: { id: string; label: string; blurb?: string }) {
+  return (
+    <div id={id} className="scroll-mt-16 pt-4 first:pt-0 print-block">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b-2 border-slate-300 pb-2">
+        <h2 className="text-xl font-extrabold tracking-tight text-ink">{label}</h2>
+        {blurb && <p className="text-[13px] text-ink-muted">{blurb}</p>}
+      </div>
     </div>
   );
 }
