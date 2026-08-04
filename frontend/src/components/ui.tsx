@@ -23,6 +23,8 @@ export function Logo({ compact = false, light = false }: { compact?: boolean; li
         <span
           className={cx(
             'absolute left-0 top-0 h-4 w-4 rounded-full',
+            // `light` means "drawn on the navy chrome", not "light theme" - this
+            // dot is white in both themes, so it must not use bg-surface.
             light ? 'bg-white' : 'bg-navy-900'
           )}
         />
@@ -272,7 +274,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={cx(
-          'relative my-auto w-full animate-scale-in rounded-2xl bg-white shadow-pop',
+          'relative my-auto w-full animate-scale-in rounded-2xl bg-surface shadow-pop',
           size === 'lg' ? 'max-w-3xl' : 'max-w-xl'
         )}
       >
@@ -373,7 +375,7 @@ export function TagInput({
     <div>
       <div
         onClick={() => inputRef.current?.focus()}
-        className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20"
+        className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg border border-slate-300 bg-surface px-2.5 py-2 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20"
       >
         {value.map((tag, i) => (
           <span

@@ -66,7 +66,7 @@ export default function SignalsPage() {
               'rounded-lg px-3 py-1.5 text-[13px] font-semibold capitalize transition',
               filter === cat
                 ? 'bg-brand-600 text-white'
-                : 'bg-white text-ink-muted ring-1 ring-slate-200 hover:bg-slate-50 hover:text-ink'
+                : 'bg-surface text-ink-muted ring-1 ring-slate-200 hover:bg-slate-50 hover:text-ink'
             )}
           >
             {cat === 'ma' ? 'M&A' : cat}

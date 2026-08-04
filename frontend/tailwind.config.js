@@ -1,12 +1,23 @@
+// Every neutral and every pale tint resolves through a CSS variable, so the
+// dark theme is one block of variable overrides in index.css rather than a
+// `dark:` class on several hundred elements. Saturated brand shades stay
+// literal: they are used as button backgrounds, where the colour must not move.
+const v = (name) => `rgb(var(${name}) / <alpha-value>)`;
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/**/*.{js,jsx,ts,tsx}', './public/index.html'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
         // Product blue. `brand` is the interactive colour, `navy` the chrome.
         brand: {
-          50: '#eff6ff',
+          50: v('--tint-brand'),
+          // Stays literal: the navy sidebar and the auth panel use brand-100 as
+          // TEXT on chrome that is dark in both themes, so it must never follow
+          // the theme. Its two `hover:bg-brand-100` uses get a dark-mode
+          // override by class name in index.css instead.
           100: '#dbeafe',
           200: '#bfdbfe',
           300: '#93c5fd',
@@ -24,11 +35,32 @@ module.exports = {
           950: '#060f1f',
         },
         ink: {
-          DEFAULT: '#0f172a',
-          soft: '#334155',
-          muted: '#64748b',
-          faint: '#94a3b8',
+          DEFAULT: v('--ink'),
+          soft: v('--ink-soft'),
+          muted: v('--ink-muted'),
+          faint: v('--ink-faint'),
         },
+        // Cards, inputs, menus - anything that sits on top of the page colour.
+        // Replaces bare `bg-white`, which cannot flip with the theme.
+        surface: v('--surface'),
+        slate: {
+          50: v('--slate-50'),
+          100: v('--slate-100'),
+          200: v('--slate-200'),
+          300: v('--slate-300'),
+          400: v('--slate-400'),
+          500: v('--slate-500'),
+          600: v('--slate-600'),
+          700: v('--slate-700'),
+          800: v('--slate-800'),
+          900: v('--slate-900'),
+        },
+        // Only the pale ends are variable - these are backgrounds. The darker
+        // shades of these hues are text, handled by overrides in index.css.
+        red: { 50: v('--tint-red') },
+        emerald: { 50: v('--tint-emerald') },
+        amber: { 50: v('--tint-amber') },
+        violet: { 50: v('--tint-violet') },
       },
       fontFamily: {
         sans: [

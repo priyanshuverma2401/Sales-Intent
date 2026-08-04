@@ -63,7 +63,7 @@ export default function InboxPage() {
                   'rounded-lg px-3.5 py-2 text-[13px] font-semibold transition',
                   showArchived === option.archived
                     ? 'bg-brand-600 text-white'
-                    : 'bg-white text-ink-muted ring-1 ring-slate-200 hover:bg-slate-50'
+                    : 'bg-surface text-ink-muted ring-1 ring-slate-200 hover:bg-slate-50'
                 )}
               >
                 {option.label}

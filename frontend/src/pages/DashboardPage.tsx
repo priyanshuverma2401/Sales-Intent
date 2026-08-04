@@ -87,7 +87,7 @@ export default function DashboardPage() {
 
       {/* Onboarding nudge */}
       {incomplete && (
-        <Card className="mb-6 border-brand-200 bg-gradient-to-br from-brand-50 to-white p-6">
+        <Card className="mb-6 border-brand-200 bg-gradient-to-br from-brand-50 to-surface p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex gap-4">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-600">

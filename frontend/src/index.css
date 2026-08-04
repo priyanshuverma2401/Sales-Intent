@@ -4,6 +4,86 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Theme tokens.
+
+   Tailwind's neutral utilities (bg-slate-*, text-ink-*, border-slate-*) and the
+   pale tints all resolve through these, so switching theme is a matter of
+   swapping the variables - no component markup carries a `dark:` variant.
+
+   Values are space-separated RGB channels because the Tailwind config wraps
+   them as `rgb(var(--x) / <alpha-value>)`, which is what keeps `/60` opacity
+   modifiers working.
+   --------------------------------------------------------------------------- */
+:root {
+  --surface: 255 255 255;
+
+  --ink: 15 23 42;
+  --ink-soft: 51 65 85;
+  --ink-muted: 100 116 139;
+  --ink-faint: 148 163 184;
+
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+
+  --tint-brand: 239 246 255;
+  --tint-brand-strong: 219 234 254;
+  --tint-red: 254 242 242;
+  --tint-emerald: 236 253 245;
+  --tint-amber: 255 251 235;
+  --tint-violet: 245 243 255;
+
+  color-scheme: light;
+}
+
+/*
+ * Dark theme. Deliberately a deep slate-blue rather than pure black: it keeps
+ * the navy sidebar from disappearing into the page, and long report text is
+ * easier to read on a surface that is not maximum contrast.
+ *
+ * The neutral ramp inverts (50 becomes the darkest), so `bg-slate-100` stays a
+ * subtle raised panel and `border-slate-200` stays a hairline, exactly as they
+ * read in light mode.
+ */
+.dark {
+  --surface: 22 30 46;
+
+  --ink: 241 245 249;
+  --ink-soft: 203 213 225;
+  --ink-muted: 148 163 184;
+  --ink-faint: 113 128 150;
+
+  --slate-50: 14 20 33;
+  --slate-100: 30 40 59;
+  --slate-200: 45 57 79;
+  --slate-300: 62 76 100;
+  --slate-400: 100 116 139;
+  --slate-500: 128 143 166;
+  --slate-600: 160 174 192;
+  --slate-700: 190 201 214;
+  --slate-800: 214 222 232;
+  --slate-900: 237 242 247;
+
+  /* Pale chips become low-alpha washes of their hue - a light chip on a dark
+     page reads as a rendering bug, however faithful the hue. */
+  --tint-brand: 30 47 84;
+  --tint-brand-strong: 37 60 105;
+  --tint-red: 69 32 38;
+  --tint-emerald: 22 56 48;
+  --tint-amber: 66 51 24;
+  --tint-violet: 51 42 82;
+
+  color-scheme: dark;
+}
+
 @layer base {
   html,
   body,
@@ -14,12 +94,13 @@
   body {
     margin: 0;
     @apply bg-slate-50 text-ink antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   /* One consistent focus ring across every interactive element */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: none;
-    @apply ring-2 ring-brand-500/40 ring-offset-2 ring-offset-white;
+    @apply ring-2 ring-brand-500/40 ring-offset-2 ring-offset-surface;
   }
 
   ::-webkit-scrollbar {
@@ -40,7 +121,7 @@
 @layer components {
   /* --- Surfaces --- */
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+    @apply rounded-xl border border-slate-200 bg-surface shadow-card;
   }
   .card-pad {
     @apply p-5 sm:p-6;
@@ -64,13 +145,13 @@
     @apply bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
   }
   .btn-secondary {
-    @apply border border-slate-200 bg-white text-ink-soft hover:bg-slate-50 hover:text-ink;
+    @apply border border-slate-200 bg-surface text-ink-soft hover:bg-slate-50 hover:text-ink;
   }
   .btn-ghost {
     @apply text-ink-muted hover:bg-slate-100 hover:text-ink;
   }
   .btn-danger {
-    @apply border border-red-200 bg-white text-red-600 hover:bg-red-50;
+    @apply border border-red-200 bg-surface text-red-600 hover:bg-red-50;
   }
 
   /* --- Forms --- */
@@ -81,7 +162,7 @@
     @apply mt-1.5 text-xs leading-relaxed text-ink-muted;
   }
   .input {
-    @apply block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink
+    @apply block w-full rounded-lg border border-slate-300 bg-surface px-3.5 py-2.5 text-sm text-ink
            placeholder:text-ink-faint focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
   }
   textarea.input {
@@ -123,9 +204,95 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Dark-mode corrections for the saturated shades.
+
+   These stayed literal in the Tailwind config because they double as button
+   backgrounds - `bg-brand-600` must not move with the theme. As *text* on a
+   dark surface they fall well short of readable, so they are lifted here by
+   class name. Descendant selectors outrank the flat utilities, and the hover
+   rules carry one more class so they outrank the base override too.
+   --------------------------------------------------------------------------- */
+.dark .text-brand-600 { color: #60a5fa; }
+.dark .text-brand-700 { color: #93c5fd; }
+.dark .text-brand-800,
+.dark .text-brand-900 { color: #bfdbfe; }
+.dark .hover\:text-brand-600:hover { color: #93c5fd; }
+.dark .hover\:text-brand-700:hover { color: #bfdbfe; }
+
+.dark .text-red-600 { color: #f87171; }
+.dark .text-red-700 { color: #fca5a5; }
+.dark .hover\:text-red-600:hover { color: #fca5a5; }
+
+.dark .text-emerald-600 { color: #34d399; }
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900 { color: #6ee7b7; }
+
+.dark .text-amber-600 { color: #fbbf24; }
+.dark .text-amber-700,
+.dark .text-amber-800,
+.dark .text-amber-900 { color: #fcd34d; }
+
+.dark .text-violet-600 { color: #a78bfa; }
+.dark .text-violet-700 { color: #c4b5fd; }
+.dark .text-cyan-700 { color: #67e8f9; }
+
+/* brand-100 is literal so the sidebar's text stays light in both themes; its
+   two uses as a hover background on light surfaces are corrected here. */
+.dark .hover\:bg-brand-100:hover {
+  background-color: rgb(var(--tint-brand-strong));
+}
+
+/* Tinted hairlines: the light-mode 200s glare against a dark panel */
+.dark .border-brand-200 { border-color: #2b4a80; }
+.dark .border-brand-300 { border-color: #35578f; }
+.dark .border-red-200 { border-color: #7f3038; }
+.dark .border-emerald-200 { border-color: #1f5c4d; }
+.dark .border-amber-200 { border-color: #6b5324; }
+.dark .ring-brand-200 { --tw-ring-color: #2b4a80; }
+
+/* Shadows tuned for a white page vanish on a dark one; a light top edge does
+   the lifting instead. */
+.dark .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4), inset 0 1px 0 0 rgb(255 255 255 / 0.03);
+}
+.dark .shadow-raised {
+  box-shadow: 0 4px 10px -2px rgb(0 0 0 / 0.5), inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+}
+.dark .shadow-pop {
+  box-shadow: 0 20px 30px -8px rgb(0 0 0 / 0.6), inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+}
+
 /* Printing the report view should produce something usable even without the
    PDF export: drop the chrome and keep sections whole. */
 @media print {
+  /* Paper is white whatever the screen is doing, so the dark palette is reset
+     rather than printed - otherwise a report exports as light text on nothing. */
+  .dark {
+    --surface: 255 255 255;
+    --ink: 15 23 42;
+    --ink-soft: 51 65 85;
+    --ink-muted: 100 116 139;
+    --ink-faint: 148 163 184;
+    --slate-50: 248 250 252;
+    --slate-100: 241 245 249;
+    --slate-200: 226 232 240;
+    --slate-300: 203 213 225;
+    --slate-600: 71 85 105;
+    --tint-brand: 239 246 255;
+    --tint-brand-strong: 219 234 254;
+    --tint-red: 254 242 242;
+    --tint-emerald: 236 253 245;
+    --tint-amber: 255 251 235;
+    --tint-violet: 245 243 255;
+    color-scheme: light;
+  }
+  .dark .text-brand-600 { color: #2563eb; }
+  .dark .text-brand-700 { color: #1d4ed8; }
+  .dark .text-ink,
+  .dark .report-body { color: inherit; }
+
   body {
     background: #fff;
   }

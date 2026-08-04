@@ -245,10 +245,13 @@ export default function ReportDetailPage() {
 
       {/* ---------------- Cover ---------------- */}
       <Card className="mb-5 overflow-hidden print-block">
-        <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50 p-6 sm:p-8">
+        <div className="border-b border-slate-100 bg-gradient-to-br from-surface to-slate-50 p-6 sm:p-8">
           <div className="flex flex-wrap items-start justify-between gap-6">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-3">
+                {/* bg-white, not bg-surface: third-party logo art assumes a
+                    white backing, and a dark-inked mark would disappear on a
+                    dark card. */}
                 {facts.logoUrl ? (
                   <img
                     src={facts.logoUrl}
@@ -297,7 +300,7 @@ export default function ReportDetailPage() {
 
             {/* Score */}
             {report.score?.value ? (
-              <div className="flex shrink-0 flex-col items-center rounded-xl border border-slate-200 bg-white px-6 py-5">
+              <div className="flex shrink-0 flex-col items-center rounded-xl border border-slate-200 bg-surface px-6 py-5">
                 <ScoreRing value={report.score.value} band={report.score.band} size={96} />
                 <p className="mt-1 text-2xs font-semibold uppercase tracking-wider text-ink-faint">
                   Salesmotion score

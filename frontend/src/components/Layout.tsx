@@ -9,12 +9,15 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
   Sparkles,
+  Sun,
 } from 'lucide-react';
 import { useAuthStore, needsOnboarding } from '../store/authStore';
+import { useThemeStore } from '../store/themeStore';
 import { inboxAPI } from '../services/api';
 import { Logo, cx } from './ui';
 
@@ -26,6 +29,52 @@ const NAV = [
   { path: '/alerts', label: 'Alerts', icon: AlertCircle },
   { path: '/inbox', label: 'Inbox', icon: Mail },
 ];
+
+/**
+ * Segmented light/dark control. A two-state segment rather than a single
+ * cycling icon: at a glance it shows which theme is active, not merely which
+ * one you would get if you pressed it.
+ */
+function ThemeToggle() {
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+
+  const options = [
+    { value: 'light' as const, icon: Sun, label: 'Light' },
+    { value: 'dark' as const, icon: Moon, label: 'Dark' },
+  ];
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Colour theme"
+      className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5"
+    >
+      {options.map(({ value, icon: Icon, label }) => {
+        const active = theme === value;
+
+        return (
+          <button
+            key={value}
+            role="radio"
+            aria-checked={active}
+            aria-label={`${label} theme`}
+            title={`${label} theme`}
+            onClick={() => setTheme(value)}
+            className={cx(
+              'flex h-7 w-7 items-center justify-center rounded-md transition',
+              active
+                ? 'bg-surface text-ink shadow-card'
+                : 'text-ink-faint hover:text-ink-muted'
+            )}
+          >
+            <Icon size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar') === 'collapsed');
@@ -168,7 +217,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* ---------------- Main ---------------- */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print flex h-16 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-6">
+        <header className="no-print flex h-16 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-surface px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Building2 size={16} className="shrink-0 text-ink-faint" />
             <div className="min-w-0">
@@ -182,6 +231,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-1">
+            <ThemeToggle />
+
+            <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
+
             <Link
               to="/inbox"
               className="relative rounded-lg p-2 text-ink-muted transition hover:bg-slate-100 hover:text-ink"
@@ -213,7 +266,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 top-full z-40 mt-2 w-64 animate-scale-in rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
+                <div className="absolute right-0 top-full z-40 mt-2 w-64 animate-scale-in rounded-xl border border-slate-200 bg-surface p-1.5 shadow-pop">
                   <div className="border-b border-slate-100 px-3 py-2.5">
                     <p className="truncate text-sm font-semibold text-ink">
                       {user?.firstName} {user?.lastName}

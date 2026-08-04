@@ -9,6 +9,20 @@
       content="SalesMotion - AI-powered sales intelligence platform"
     />
     <title>SalesMotion</title>
+    <script>
+      // Runs before first paint so a dark-mode user never sees a white flash
+      // while the bundle loads. Mirrors resolveInitialTheme() in themeStore.ts.
+      (function () {
+        try {
+          var stored = localStorage.getItem('salesmotion.theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

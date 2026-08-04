@@ -28,7 +28,7 @@ export default function AuthShell({
   };
 
   return (
-    <div className="flex min-h-screen bg-white">
+    <div className="flex min-h-screen bg-surface">
       {/* Brand rail */}
       <aside className="relative hidden w-[44%] max-w-[560px] flex-col justify-between overflow-hidden bg-navy-900 px-12 py-12 lg:flex">
         <div

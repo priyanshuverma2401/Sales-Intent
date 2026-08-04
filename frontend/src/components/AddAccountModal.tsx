@@ -152,7 +152,7 @@ export default function AddAccountModal({
         {selected ? (
           <div className="flex items-start justify-between gap-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
             <div className="flex min-w-0 gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface">
                 <Building2 size={17} className="text-brand-600" />
               </div>
               <div className="min-w-0">
@@ -275,7 +275,7 @@ export default function AddAccountModal({
         <label
           className={cx(
             'flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition',
-            generateReport ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-white'
+            generateReport ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-surface'
           )}
         >
           <input
