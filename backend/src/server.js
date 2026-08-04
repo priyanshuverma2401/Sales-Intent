@@ -103,11 +103,20 @@ const globalLimiter = limiter(
   'Too many requests. Wait a minute and try again.'
 );
 
-const authLimiter = limiter(
-  Number(process.env.RATE_LIMIT_AUTH) || 30,
-  15 * 60 * 1000,
-  'Too many sign-in attempts. Try again in a few minutes.'
-);
+// Only guards credential submission (POST login/register). The signup form calls
+// GET /auth/organization-by-domain on every pause in typing, so counting reads
+// against the same budget would rate-limit someone simply correcting a typo in
+// their email — and a 429 there renders as "No subscription found", which looks
+// like a rejected domain rather than a throttle. Reads stay under the global cap.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_AUTH) || 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'GET',
+  handler: (req, res) =>
+    res.status(429).json({ error: 'Too many sign-in attempts. Try again in a few minutes.' }),
+});
 
 const reportLimiter = limiter(
   Number(process.env.RATE_LIMIT_REPORTS) || 40,
@@ -178,6 +187,12 @@ app.get('/api/health', (req, res) => {
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'Server is running' : 'Degraded: database unavailable',
     mongodb: dbUp ? 'connected' : starting ? 'connecting' : 'disconnected',
+    // Which database the URI actually resolved to. An Atlas connection string
+    // copied from "Connect -> Drivers" has no database name in it, and Mongoose
+    // silently falls back to 'test' — an empty database where every org lookup
+    // fails with "no subscription found". Surfacing the name makes that obvious
+    // instead of looking like a bug in the app.
+    database: dbUp ? mongoose.connection.name : null,
     supabase: getSupabase() ? 'configured' : 'not configured',
     aiProviders: aiProviders.status(),
     uptimeSeconds: Math.round(process.uptime()),
