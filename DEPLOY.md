@@ -56,13 +56,28 @@ until step 4. That is fine.
 
 Note the service URL, e.g. `https://salesmotion-api.onrender.com`.
 
-### Why `starter` and not `free`
+### The free plan
 
-Reports finish generating **after** the HTTP response is sent. The free plan
-spins the instance down after ~15 minutes idle, which kills any generation still
-running and adds a ~50 second cold start to the next request. On `starter` the
-instance stays up. Either way no report gets stuck forever — the sweeper
-(below) resolves orphans — but on free they fail instead of finishing.
+`render.yaml` uses `plan: free`, so Render will not ask for a card. If it does
+show a "Payment Information Required" dialog, the blueprint still says
+`starter` somewhere — cancel, fix the plan, push, and retry.
+
+Two things to expect on free:
+
+- **Cold starts.** The instance sleeps after ~15 minutes with no inbound
+  traffic, and the next request takes ~50 seconds to wake it. The frontend sets
+  no request timeout, so it waits rather than erroring — it just looks slow.
+- **Reports lost to sleep.** Generation continues *after* the HTTP response is
+  sent, so a report still running when the instance sleeps does not finish. The
+  sweeper marks it `failed` with a "run it again" message instead of leaving it
+  stuck on `pending`, so nothing hangs — but the work is wasted.
+
+Upgrading to `starter` later removes both, and needs no code change.
+
+**Optional:** an external uptime pinger hitting `/api/health` every 10 minutes
+keeps the instance awake and kills the cold starts. Note that Render's free tier
+allows 750 instance-hours per month and a month is ~730 hours, so this fits — but
+only for a single free service.
 
 ---
 

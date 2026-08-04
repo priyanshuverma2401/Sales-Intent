@@ -11,14 +11,17 @@ services:
   - type: web
     name: salesmotion-api
     runtime: node
+    # Free instances are available in every region. oregon is the default;
+    # singapore or frankfurt will be noticeably faster from India/Europe.
     region: oregon
-    # `starter` and not `free` deliberately. Reports are generated in the
-    # background after the HTTP response returns, and the free plan spins the
-    # instance down after ~15 minutes idle — which kills any generation still in
-    # flight and adds a ~50s cold start to the next request. reportSweeper
-    # recovers the orphaned reports either way, but on free they fail rather
-    # than finish. Switch to `free` only if that is an acceptable trade.
-    plan: starter
+    # Free plan: no card required, but the instance spins down after ~15 minutes
+    # with no inbound traffic. Two consequences to know about:
+    #   1. The first request after a sleep takes ~50s while it wakes back up.
+    #   2. A report still generating when it sleeps is lost — reportSweeper marks
+    #      it 'failed' with a "run it again" message rather than leaving it stuck
+    #      on 'pending' forever, so nothing hangs, but the work is wasted.
+    # Change to `starter` (paid) to remove both. Nothing else needs to change.
+    plan: free
     rootDir: backend
     # --omit=dev keeps jest and nodemon out of the running image: smaller, faster
     # to build, and nothing dev-only can be reached from production.
