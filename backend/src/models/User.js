@@ -83,6 +83,18 @@ const userSchema = new mongoose.Schema({
   },
 });
 
+// Accounts created before the owner/admin/member enum carry role 'user'. Left
+// alone they fail validation on any save - including the watchlist write that
+// adds an account - so map them onto the current vocabulary as they pass through.
+const LEGACY_ROLES = { user: 'member' };
+
+userSchema.pre('validate', function(next) {
+  if (LEGACY_ROLES[this.role]) {
+    this.role = LEGACY_ROLES[this.role];
+  }
+  next();
+});
+
 // Hash password before saving
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) {
