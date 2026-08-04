@@ -5,9 +5,12 @@ import {
   ArrowRight,
   Download,
   FileText,
+  Layers,
   Loader2,
   Plus,
+  Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
 import AddAccountModal from '../components/AddAccountModal';
@@ -41,21 +44,63 @@ export default function ReportsPage() {
   const [message, setMessage] = useState<{ tone: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const load = useCallback(async (silent = false) => {
+  const [query, setQuery] = useState('');
+  const [authorId, setAuthorId] = useState('all');
+  const [vertical, setVertical] = useState('all');
+
+  // Typing must not fire a request per keystroke
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Dropdown options come from the whole visible history, not the filtered
+  // page, so narrowing the list never removes the option you narrowed by.
+  const [options, setOptions] = useState<{
+    authors: { _id: string; name: string }[];
+    verticals: string[];
+  }>({ authors: [], verticals: [] });
+  const [total, setTotal] = useState(0);
+
+  const loadOptions = useCallback(async () => {
     try {
-      if (!silent) setLoading(true);
-      const res = await reportsAPI.getReports();
-      setReports(res.data);
+      const res = await reportsAPI.getReportFilters();
+      setOptions({ authors: res.data.authors || [], verticals: res.data.verticals || [] });
     } catch (err) {
-      setMessage({ tone: 'error', text: apiError(err, 'Could not load reports') });
-    } finally {
-      setLoading(false);
+      // A missing filter list is not worth an error banner; the list still works
+      setOptions({ authors: [], verticals: [] });
     }
   }, []);
 
+  const load = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setLoading(true);
+        const res = await reportsAPI.getReports({
+          ...(search ? { q: search } : {}),
+          ...(authorId !== 'all' ? { author: authorId } : {}),
+          ...(vertical !== 'all' ? { vertical } : {}),
+        });
+        setReports(res.data);
+        setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
+      } catch (err) {
+        setMessage({ tone: 'error', text: apiError(err, 'Could not load reports') });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [search, authorId, vertical]
+  );
+
+  // Refetches whenever a filter changes, because `load` depends on all three
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadOptions();
+  }, [loadOptions]);
 
   // Reports generate asynchronously, so poll while any are still pending
   const hasPending = reports.some((r) => r.status === 'pending');
@@ -64,6 +109,14 @@ export default function ReportsPage() {
     const timer = setInterval(() => load(true), 5000);
     return () => clearInterval(timer);
   }, [hasPending, load]);
+
+  const filtersActive = Boolean(query.trim()) || authorId !== 'all' || vertical !== 'all';
+
+  const clearFilters = () => {
+    setQuery('');
+    setAuthorId('all');
+    setVertical('all');
+  };
 
   const download = async (report: ReportSummary) => {
     try {
@@ -85,6 +138,9 @@ export default function ReportsPage() {
       setBusyId(report._id);
       await reportsAPI.remove(report._id);
       setReports((prev) => prev.filter((r) => r._id !== report._id));
+      setTotal((prev) => Math.max(0, prev - 1));
+      // That may have been the last report by an author or in a vertical
+      loadOptions();
     } catch (err) {
       setMessage({ tone: 'error', text: apiError(err, 'Could not delete the report') });
     } finally {
@@ -113,8 +169,80 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* Filters. Keyed off the unfiltered total so the bar - and the Clear
+          button - survive a search that matches nothing. */}
+      {total > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[200px] flex-1">
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
+            <input
+              className="input pl-9"
+              placeholder="Search by company name…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          <select
+            className="input w-auto min-w-[170px]"
+            value={authorId}
+            onChange={(e) => setAuthorId(e.target.value)}
+            aria-label="Filter by who generated the report"
+          >
+            <option value="all">All researchers</option>
+            {options.authors.map((a) => (
+              <option key={a._id} value={a._id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="input w-auto min-w-[170px]"
+            value={vertical}
+            onChange={(e) => setVertical(e.target.value)}
+            aria-label="Filter by vertical"
+            disabled={options.verticals.length === 0}
+          >
+            <option value="all">All verticals</option>
+            {options.verticals.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+
+          {filtersActive && (
+            <button
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-semibold text-ink-muted transition hover:bg-slate-100 hover:text-ink"
+            >
+              <X size={14} /> Clear
+            </button>
+          )}
+
+          <span className="ml-auto shrink-0 text-[13px] text-ink-muted">
+            {filtersActive ? `${reports.length} of ${total}` : `${total} reports`}
+          </span>
+        </div>
+      )}
+
       {loading ? (
         <SkeletonRows rows={3} />
+      ) : reports.length === 0 && filtersActive ? (
+        <EmptyState
+          icon={Search}
+          title="Nothing matches those filters"
+          description="No report in your team matches what you are looking for."
+          action={
+            <Button variant="secondary" icon={X} onClick={clearFilters}>
+              Clear filters
+            </Button>
+          }
+        />
       ) : reports.length === 0 ? (
         <EmptyState
           icon={FileText}
@@ -159,6 +287,12 @@ export default function ReportsPage() {
                           .filter(Boolean)
                           .join(' · ') || 'Account brief'}
                       </p>
+                      {report.context?.vertical && (
+                        <p className="mt-1.5 flex items-center gap-1.5 text-2xs text-ink-muted">
+                          <Layers size={11} className="shrink-0 text-ink-faint" />
+                          <span className="truncate font-medium">{report.context.vertical}</span>
+                        </p>
+                      )}
                       {report.author && !report.isMine && (
                         <p className="mt-1 truncate text-2xs text-ink-faint">
                           Researched by {report.author.name}
@@ -269,6 +403,7 @@ export default function ReportsPage() {
         onClose={() => setModalOpen(false)}
         onAdded={({ companyName, reportId, reportError }) => {
           load(true);
+          loadOptions();
           if (reportError) {
             setMessage({ tone: 'error', text: `${companyName} added, but: ${reportError.error}` });
           } else if (reportId) {

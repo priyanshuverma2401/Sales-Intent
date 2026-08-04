@@ -25,6 +25,9 @@ app.use(cors({
     return callback(err);
   },
   credentials: true,
+  // Without this the browser hides the header from JS on a cross-origin call,
+  // and the reports list cannot show "8 of 60".
+  exposedHeaders: ['X-Total-Count'],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

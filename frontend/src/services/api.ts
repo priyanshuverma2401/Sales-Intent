@@ -117,7 +117,11 @@ export const signalsAPI = {
 
 export const reportsAPI = {
   generate: (companyId: string) => API.post(`/reports/${companyId}`),
-  getReports: () => API.get('/reports'),
+  // Filtering happens server-side so it covers the whole history, not just the
+  // page the browser happens to be holding. Blank/`all` values are omitted.
+  getReports: (params?: { q?: string; author?: string; vertical?: string }) =>
+    API.get('/reports', { params }),
+  getReportFilters: () => API.get('/reports/filters'),
   getReport: (id: string) => API.get(`/reports/${id}`),
   remove: (id: string) => API.delete(`/reports/${id}`),
   // The response is a PDF, so it must be read as a blob rather than parsed

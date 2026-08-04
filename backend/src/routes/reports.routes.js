@@ -1,7 +1,9 @@
 const express = require('express');
 const fs = require('fs');
+const mongoose = require('mongoose');
 const Report = require('../models/Report');
 const Company = require('../models/Company');
+const User = require('../models/User');
 const { authenticate, isManager, sameOrg } = require('../middleware/auth');
 const reportService = require('../services/reportService');
 const reportGenerator = require('../services/reportGenerator');
@@ -51,22 +53,94 @@ router.post('/:companyId', authenticate, async (req, res) => {
   }
 });
 
+// Everything the caller is entitled to see. Reports written before
+// organizationId was stored have none, so the author's own work is unioned in
+// rather than disappearing from their list.
+function visibleScope(req) {
+  return req.organization?._id
+    ? { $or: [{ organizationId: req.organization._id }, { userId: req.user._id }] }
+    : { userId: req.user._id };
+}
+
+// User input goes into a $regex, so metacharacters have to be defanged - a
+// search for "C++ Ltd." must not compile into a pattern (or blow up).
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------------------------------------------------------------
+// Options for the report filters: who has written reports, and through which
+// verticals. Derived from the whole visible set, so the dropdowns stay complete
+// no matter how narrow the current filter is.
+// Declared before '/:id' so "filters" is never read as an id.
+// ---------------------------------------------------------------------------
+router.get('/filters', authenticate, async (req, res) => {
+  try {
+    const scope = visibleScope(req);
+
+    const [authorIds, verticals] = await Promise.all([
+      Report.distinct('userId', scope),
+      Report.distinct('context.vertical', scope),
+    ]);
+
+    const authors = await User.find({ _id: { $in: authorIds.filter(Boolean) } })
+      .select('firstName lastName email')
+      .sort({ firstName: 1, lastName: 1 });
+
+    res.json({
+      authors: authors.map(a => ({
+        _id: a._id,
+        name: `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email,
+      })),
+      verticals: verticals.filter(v => typeof v === 'string' && v.trim()).sort(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // List every report in the signed-in user's organization (summary payload only)
 //
 // Org-wide for both roles: a rep should see what the desk has already researched
 // rather than regenerate it. Each row carries who wrote it and whether the
 // caller may delete it, so the UI never has to infer permissions from the role.
+//
+// Filtering is done here rather than in the browser so it covers the whole
+// history instead of only the page that happens to be loaded.
+//   ?q=hsbc          company name, ticker or industry, case-insensitive
+//   ?author=<userId> who generated it
+//   ?vertical=<name> the lens it was written through
 // ---------------------------------------------------------------------------
 router.get('/', authenticate, async (req, res) => {
   try {
-    // Reports written before organizationId was stored have none, so the
-    // author's own work is unioned in rather than disappearing from their list.
-    const scope = req.organization?._id
-      ? { $or: [{ organizationId: req.organization._id }, { userId: req.user._id }] }
-      : { userId: req.user._id };
+    const scope = visibleScope(req);
+    const { q, author, vertical } = req.query;
 
-    const reports = await Report.find(scope)
+    // $and keeps the scope's own $or intact when the search adds a second one
+    const conditions = [scope];
+
+    if (q && String(q).trim()) {
+      const rx = new RegExp(escapeRegex(String(q).trim()), 'i');
+      conditions.push({
+        $or: [{ companyName: rx }, { ticker: rx }, { 'fastFacts.industry': rx }],
+      });
+    }
+    if (author && author !== 'all' && mongoose.isValidObjectId(author)) {
+      conditions.push({ userId: author });
+    }
+    if (vertical && vertical !== 'all') {
+      conditions.push({ 'context.vertical': String(vertical) });
+    }
+
+    const filter = conditions.length > 1 ? { $and: conditions } : scope;
+
+    // The unfiltered total, so the UI can say "8 of 60" without a second call.
+    // Exposed via header to keep the body a plain array for existing callers.
+    const total = await Report.countDocuments(scope);
+    res.set('X-Total-Count', String(total));
+
+    const reports = await Report.find(filter)
       .select([
         'companyName', 'companyId', 'ticker', 'status', 'progress', 'error',
         'score.value', 'score.band', 'score.summary',

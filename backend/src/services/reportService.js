@@ -67,6 +67,19 @@ class ReportService {
     return links;
   }
 
+  /** The lens this report was written through, stored on the Report itself. */
+  buildContextStamp(seller, profile) {
+    return {
+      sellerName: seller.name,
+      sellerCapabilities: seller.capabilities,
+      sellerValuePropositions: seller.valuePropositions,
+      vertical: profile.vertical,
+      verticalCapabilities: profile.verticalCapabilities,
+      keywords: profile.keywords,
+      targetDepartments: profile.targetDepartments,
+    };
+  }
+
   /** Why a report cannot be generated yet, or null when it can. */
   validate(profile) {
     if (!aiEngine.enabled) {
@@ -110,6 +123,10 @@ class ReportService {
       status: 'pending',
       progress: { step: 'Queued', percent: 5 },
       generatedAt: new Date(),
+      // Stamped up front, not on completion: the lens is known the moment the
+      // report is requested, and the reports list filters on it. Writing it only
+      // on success left every pending and failed report with no vertical.
+      context: this.buildContextStamp(seller, profile),
     });
     await report.save();
 
@@ -155,15 +172,7 @@ class ReportService {
       onProgress: setProgress,
     });
 
-    report.context = {
-      sellerName: seller.name,
-      sellerCapabilities: seller.capabilities,
-      sellerValuePropositions: seller.valuePropositions,
-      vertical: profile.vertical,
-      verticalCapabilities: profile.verticalCapabilities,
-      keywords: profile.keywords,
-      targetDepartments: profile.targetDepartments,
-    };
+    report.context = this.buildContextStamp(seller, profile);
     report.score = result.score;
     report.fastFacts = this.buildFastFacts(company, result.evidence.financial);
     report.quickLinks = this.buildQuickLinks(company);
