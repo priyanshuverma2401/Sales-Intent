@@ -7,8 +7,10 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 import { accountsAPI, apiError, companiesAPI, reportsAPI } from '../services/api';
 import AddAccountModal from '../components/AddAccountModal';
@@ -66,18 +68,33 @@ export default function AccountsPage() {
   const [message, setMessage] = useState<{ tone: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const load = useCallback(async (silent = false) => {
-    try {
-      if (!silent) setLoading(true);
-      const res = await accountsAPI.getAccounts();
-      setAccounts(res.data);
-    } catch (err) {
-      setMessage({ tone: 'error', text: apiError(err, 'Could not load accounts') });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [query, setQuery] = useState('');
+  const [total, setTotal] = useState(0);
 
+  // Typing must not fire a request per keystroke
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const load = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setLoading(true);
+        const res = await accountsAPI.getAccounts(search ? { q: search } : undefined);
+        setAccounts(res.data);
+        setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
+      } catch (err) {
+        setMessage({ tone: 'error', text: apiError(err, 'Could not load accounts') });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [search]
+  );
+
+  // Refetches when the search changes, because `load` depends on it
   useEffect(() => {
     load();
   }, [load]);
@@ -157,8 +174,51 @@ export default function AccountsPage() {
         </div>
       )}
 
+      {/* Search. Keyed off the unfiltered total so the box - and the Clear
+          button - survive a query that matches nothing. */}
+      {total > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[220px] flex-1">
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
+            <input
+              className="input pl-9"
+              placeholder="Search accounts by name, ticker, industry or country…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          {query.trim() && (
+            <button
+              onClick={() => setQuery('')}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-semibold text-ink-muted transition hover:bg-slate-100 hover:text-ink"
+            >
+              <X size={14} /> Clear
+            </button>
+          )}
+
+          <span className="ml-auto shrink-0 text-[13px] text-ink-muted">
+            {search ? `${accounts.length} of ${total}` : `${total} accounts`}
+          </span>
+        </div>
+      )}
+
       {loading ? (
         <SkeletonRows rows={3} />
+      ) : accounts.length === 0 && search ? (
+        <EmptyState
+          icon={Search}
+          title="No accounts match that search"
+          description={`Nothing in your pipeline matches "${search}".`}
+          action={
+            <Button variant="secondary" icon={X} onClick={() => setQuery('')}>
+              Clear search
+            </Button>
+          }
+        />
       ) : accounts.length === 0 ? (
         <EmptyState
           icon={Building2}

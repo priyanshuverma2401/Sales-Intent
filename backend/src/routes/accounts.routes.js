@@ -12,12 +12,33 @@ function toStringArray(value) {
   return [];
 }
 
+// Matches a company against a free-text query. The watchlist is an embedded
+// array rather than its own collection, so this is a plain predicate rather
+// than a Mongo filter - but the query still arrives as ?q= like every other
+// list in the API, and the client never filters locally.
+function matchesQuery(company, q) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+
+  return [company.name, company.ticker, company.industry, company.country]
+    .filter(Boolean)
+    .some(field => String(field).toLowerCase().includes(needle));
+}
+
 // The user's accounts, each with its signal count, its pitch lens and the state
 // of its most recent report - everything the accounts board needs in one call.
+//   ?q=hsbc   company name, ticker, industry or country
 router.get('/', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('watchlist.companyId');
-    const entries = (user.watchlist || []).filter(w => w.companyId);
+    const all = (user.watchlist || []).filter(w => w.companyId);
+
+    const q = String(req.query.q || '').trim();
+    const entries = q ? all.filter(w => matchesQuery(w.companyId, q)) : all;
+
+    // Unfiltered size, so the UI can say "1 of 12" without a second request
+    res.set('X-Total-Count', String(all.length));
+
     const companyIds = entries.map(w => w.companyId._id);
 
     const [counts, reports] = await Promise.all([

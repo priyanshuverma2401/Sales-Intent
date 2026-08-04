@@ -102,7 +102,8 @@ export const companiesAPI = {
 };
 
 export const accountsAPI = {
-  getAccounts: () => API.get('/accounts'),
+  // Search runs server-side, like every other list in the API
+  getAccounts: (params?: { q?: string }) => API.get('/accounts', { params }),
   update: (companyId: string, data: { keywords?: string[]; notes?: string }) =>
     API.patch(`/accounts/${companyId}`, data),
 };
