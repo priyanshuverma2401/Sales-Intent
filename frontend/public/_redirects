@@ -1,0 +1,12 @@
+# Single-page-app routing for Cloudflare Pages.
+#
+# React Router owns paths like /reports/<id> and /accounts on the client. Without
+# this rule Cloudflare looks for a matching file on disk, finds none, and serves
+# its 404 page — so any bookmark, shared link, or plain browser refresh on a page
+# other than "/" appears broken.
+#
+# 200 (not 301/302) means the URL stays in the address bar while index.html is
+# served, which is what lets the router read the path and render the right page.
+#
+# CRA copies everything in public/ into build/ verbatim, so this ships as-is.
+/*    /index.html   200

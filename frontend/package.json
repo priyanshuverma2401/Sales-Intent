@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Sales Intelligence Platform Frontend",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

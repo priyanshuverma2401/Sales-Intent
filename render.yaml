@@ -1,0 +1,78 @@
+# Render Blueprint for the SalesMotion API.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Render reads
+# this file and creates the service. The secrets marked `sync: false` are left
+# blank on purpose and must be pasted into the dashboard once — they are never
+# committed to the repo.
+#
+# The frontend is NOT defined here; it deploys separately on Cloudflare Pages.
+
+services:
+  - type: web
+    name: salesmotion-api
+    runtime: node
+    region: oregon
+    # `starter` and not `free` deliberately. Reports are generated in the
+    # background after the HTTP response returns, and the free plan spins the
+    # instance down after ~15 minutes idle — which kills any generation still in
+    # flight and adds a ~50s cold start to the next request. reportSweeper
+    # recovers the orphaned reports either way, but on free they fail rather
+    # than finish. Switch to `free` only if that is an acceptable trade.
+    plan: starter
+    rootDir: backend
+    # --omit=dev keeps jest and nodemon out of the running image: smaller, faster
+    # to build, and nothing dev-only can be reached from production.
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    # A 503 here (database unreachable) marks the instance unhealthy so Render
+    # replaces it instead of leaving it up failing every request.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render injects the real port at runtime; the app reads process.env.PORT.
+      - key: PORT
+        value: 5000
+
+      # Generated once by Render and kept stable across deploys. Rotating it
+      # signs every existing login out, so do not regenerate casually.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # --- Paste these in the dashboard (never committed) --------------------
+      # MongoDB Atlas connection string. Atlas must allow Render's outbound IPs
+      # (Network Access -> Add IP Address), or the process exits on boot.
+      - key: MONGODB_URI
+        sync: false
+
+      # The deployed frontend origin. Comma-separate to allow more than one.
+      # A wildcard entry covers Cloudflare Pages preview builds, e.g.
+      #   https://salesmotion.pages.dev,https://*.salesmotion.pages.dev
+      # Anything not listed is refused by CORS.
+      - key: FRONTEND_URL
+        sync: false
+
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+
+      # Optional SQL store. Leave blank and the app boots with it disabled.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      # --- Tunables (same defaults as the code) ------------------------------
+      - key: PROVIDER_ORDER
+        value: groq,gemini
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
