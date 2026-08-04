@@ -3,6 +3,7 @@ const cors = require('cors');
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { initSupabase, verifySupabase, getSupabase } = require('./config/supabase');
+const aiProviders = require('./services/providers');
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.get('/api/health', (req, res) => {
     status: 'Server is running',
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     supabase: getSupabase() ? 'configured' : 'not configured',
+    aiProviders: aiProviders.status(),
   });
 });
 

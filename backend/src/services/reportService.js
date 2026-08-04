@@ -171,7 +171,9 @@ class ReportService {
     report.research = result.sections.research;
     report.value = result.sections.value;
     report.sources = result.sources;
-    report.aiModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    // Which provider actually served this report - it may have failed over to
+    // the fallback part-way through, and the report should say so.
+    report.aiModel = aiEngine.lastModel;
     report.lastUpdatedAt = new Date();
 
     setProgress('Rendering PDF', 95);

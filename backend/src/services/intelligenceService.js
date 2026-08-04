@@ -4,6 +4,18 @@ const newsDataFetcher = require('./dataFetchers/newsDataFetcher');
 const financialDataFetcher = require('./dataFetchers/financialDataFetcher');
 const jobDataFetcher = require('./dataFetchers/jobDataFetcher');
 
+// The source block is repeated verbatim in every AI pass, so its length is the
+// single biggest driver of prompt size. On Groq's free tier (12k tokens/min) a
+// full-length list made one request larger than the whole per-minute budget.
+//
+// These defaults are deliberately tight for development. Every one of them is
+// an env var: raise them in .env after upgrading the Groq plan, or when running
+// on Gemini whose context window is far larger. No code change is needed.
+// Pre-limit values were 26 / 8 / 4, with SOURCE_BODY_CHARS at 320.
+const MAX_NEWS_SOURCES = Number(process.env.MAX_NEWS_SOURCES) || 8;
+const MAX_JOB_SOURCES = Number(process.env.MAX_JOB_SOURCES) || 3;
+const MAX_FILING_SOURCES = Number(process.env.MAX_FILING_SOURCES) || 2;
+
 // Orchestrates one report: gather evidence -> number the sources -> score the
 // account -> run the four AI passes -> normalise everything into the Report shape.
 class IntelligenceService {
@@ -148,7 +160,7 @@ class IntelligenceService {
     const byRecency = (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0);
 
     [...keywordMatched.sort(byRecency), ...rest.sort(byRecency)]
-      .slice(0, 26)
+      .slice(0, MAX_NEWS_SOURCES)
       .forEach(article => {
         if (!article.title) return;
         sources.push({
@@ -164,7 +176,7 @@ class IntelligenceService {
         });
       });
 
-    jobs.slice(0, 8).forEach(job => {
+    jobs.slice(0, MAX_JOB_SOURCES).forEach(job => {
       if (!job.title) return;
       sources.push({
         index: index++,
@@ -176,7 +188,7 @@ class IntelligenceService {
       });
     });
 
-    (financial.secFilings || []).slice(0, 4).forEach(filing => {
+    (financial.secFilings || []).slice(0, MAX_FILING_SOURCES).forEach(filing => {
       sources.push({
         index: index++,
         title: `SEC filing ${filing.type || ''} ${filing.date || ''}`.trim(),

@@ -1,7 +1,9 @@
-const Groq = require('groq-sdk');
+const providers = require('./providers');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+// How much of each source's body text reaches the prompt. Multiplied by the
+// source count and by the number of AI passes, so it moves prompt size fast.
+// Raise alongside MAX_NEWS_SOURCES once the Groq plan is upgraded.
+const SOURCE_BODY_CHARS = Number(process.env.SOURCE_BODY_CHARS) || 140;
 
 /**
  * Turns raw prospect research into a seller-specific intelligence report.
@@ -16,31 +18,35 @@ const MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
  * generic company profile.
  */
 class AIEngine {
+  // True when at least one provider in the chain has a usable key
   get enabled() {
-    return Boolean(process.env.GROQ_API_KEY) && process.env.GROQ_API_KEY !== 'placeholder_get_from_groq';
+    return providers.available().length > 0;
+  }
+
+  // The model that actually served the last completion, for Report.aiModel
+  get lastModel() {
+    return this._lastModel || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
   }
 
   // ---- transport ---------------------------------------------------------
 
   async complete(prompt, { maxTokens = 2048, json = false, system } = {}) {
     if (!this.enabled) {
-      throw new Error('GROQ_API_KEY is not configured - reports cannot be generated');
+      throw new Error(
+        'No AI provider is configured - set GROQ_API_KEY or GEMINI_API_KEY - reports cannot be generated'
+      );
     }
 
-    const messages = [];
-    if (system) messages.push({ role: 'system', content: system });
-    messages.push({ role: 'user', content: prompt });
-
     try {
-      const completion = await groq.chat.completions.create({
-        model: MODEL,
-        max_tokens: maxTokens,
-        temperature: 0.4,
-        messages,
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
+      const { text, provider, model } = await providers.complete({
+        system,
+        prompt,
+        maxTokens,
+        json,
       });
 
-      return completion.choices?.[0]?.message?.content || '';
+      this._lastModel = `${provider}/${model}`;
+      return text;
     } catch (error) {
       throw this.friendlyError(error);
     }
@@ -53,6 +59,19 @@ class AIEngine {
   friendlyError(error) {
     const status = error?.status || error?.response?.status;
     const detail = error?.error?.message || error?.response?.data?.error?.message || error?.message || '';
+    // By the time an error reaches here every configured provider has already
+    // been tried, so the message must read as "all of them", not "the AI".
+    const many = providers.available().length > 1;
+    const who = many ? 'Every configured AI provider' : 'The AI provider';
+
+    // A single request larger than the whole per-minute allowance. Retrying
+    // cannot help - the prompt itself has to shrink.
+    if (status === 413) {
+      return new Error(
+        `${who} rejected the request as too large. Lower MAX_NEWS_SOURCES / SOURCE_BODY_CHARS ` +
+          'in the server .env, or upgrade the plan for a higher per-minute limit.'
+      );
+    }
 
     if (status === 429) {
       const retry = /try again in ([^.]+)/i.exec(detail)?.[1];
@@ -60,18 +79,20 @@ class AIEngine {
 
       return new Error(
         daily
-          ? `The AI daily token allowance is used up${retry ? ` — it resets in ${retry.trim()}` : ''}. ` +
-            'Each report costs roughly 25k tokens; upgrade the Groq plan for more headroom.'
-          : `The AI provider is rate limiting requests${retry ? ` — retry in ${retry.trim()}` : ''}.`
+          ? `${who} has used up its daily token allowance${retry ? ` — it resets in ${retry.trim()}` : ''}. ` +
+            'Each report costs roughly 15-25k tokens; add another provider key or upgrade the plan.'
+          : `${who} is rate limiting requests${retry ? ` — retry in ${retry.trim()}` : ''}.`
       );
     }
 
     if (status === 401 || status === 403) {
-      return new Error('The AI provider rejected the API key. Check GROQ_API_KEY on the server.');
+      return new Error(
+        'The AI provider rejected the API key. Check GROQ_API_KEY and GEMINI_API_KEY on the server.'
+      );
     }
 
     if (status >= 500) {
-      return new Error('The AI provider is temporarily unavailable. Try generating the report again shortly.');
+      return new Error(`${who} is temporarily unavailable. Try generating the report again shortly.`);
     }
 
     return new Error(detail ? `AI request failed: ${detail.slice(0, 220)}` : 'AI request failed');
@@ -197,7 +218,7 @@ Financials: market cap ${this.money(prospect.financials?.marketCap)}, revenue ${
     return sources
       .map(s => {
         const date = s.publishedAt ? new Date(s.publishedAt).toISOString().slice(0, 10) : 'undated';
-        const body = (s.description || s.snippet || '').replace(/\s+/g, ' ').slice(0, 320);
+        const body = (s.description || s.snippet || '').replace(/\s+/g, ' ').slice(0, SOURCE_BODY_CHARS);
         return `[${s.index}] (${s.type}) ${s.title} — ${s.source || 'unknown'} — ${date}${body ? `\n     ${body}` : ''}`;
       })
       .join('\n');
