@@ -135,6 +135,22 @@ const reportLimiter = limiter(
   'Report generation limit reached for this hour. Try again shortly.'
 );
 
+// The public API is machine traffic: it is keyed per API key rather than per IP,
+// because several integrations behind one NAT would otherwise share a budget,
+// and a leaked key should be throttled wherever it is used from.
+const publicApiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_PUBLIC_API) || 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    req.header('X-API-Key') ||
+    String(req.header('Authorization') || '').replace(/^Bearer\s+/i, '') ||
+    req.ip,
+  handler: (req, res) =>
+    res.status(429).json({ error: 'API rate limit reached for this key.', code: 'RATE_LIMITED' }),
+});
+
 app.use('/api', globalLimiter);
 
 // ---------------------------------------------------------------------------
@@ -183,6 +199,10 @@ app.use('/api/reports', reportLimiter, require('./routes/reports.routes'));
 app.use('/api/accounts', require('./routes/accounts.routes'));
 app.use('/api/alerts', require('./routes/alerts.routes'));
 app.use('/api/inbox', require('./routes/inbox.routes'));
+app.use('/api/api-keys', require('./routes/apiKeys.routes'));
+
+// Public read API, authenticated by API key rather than a session
+app.use('/api/v1', publicApiLimiter, require('./routes/publicApi.routes'));
 
 // Health check. Render polls this; a 503 marks the instance unhealthy and gets
 // it replaced, which is the point — an instance with no database can still

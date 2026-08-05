@@ -2,8 +2,14 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
 // Configurable so the app is not pinned to a hardcoded localhost backend
+export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+// Where API-key holders call. Exported so the settings screen can show the real
+// URL for this deployment rather than a hardcoded example.
+export const PUBLIC_API_URL = `${API_BASE_URL.replace(/\/+$/, '')}/v1`;
+
 const API = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  baseURL: API_BASE_URL,
 });
 
 API.interceptors.request.use((config) => {
@@ -118,6 +124,14 @@ export const organizationsAPI = {
     API.patch(`/organizations/members/${id}`, data),
   removeMember: (id: string) => API.delete(`/organizations/members/${id}`),
   setRole: (id: string, role: string) => API.patch(`/organizations/members/${id}/role`, { role }),
+};
+
+export const apiKeysAPI = {
+  list: () => API.get('/api-keys'),
+  // The plaintext key is in this response and nowhere else
+  create: (name: string) => API.post('/api-keys', { name }),
+  rename: (id: string, name: string) => API.patch(`/api-keys/${id}`, { name }),
+  revoke: (id: string) => API.delete(`/api-keys/${id}`),
 };
 
 export const companiesAPI = {
