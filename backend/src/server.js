@@ -118,6 +118,17 @@ const authLimiter = rateLimit({
     res.status(429).json({ error: 'Too many sign-in attempts. Try again in a few minutes.' }),
 });
 
+// The login screen triages the address as it is typed, so this one GET reports
+// whether an account exists — it needs a cap of its own, since authLimiter
+// skips reads. Set well above real use (the client debounces, so a sign-in
+// costs a handful of calls even with typos, and a whole office shares one NAT
+// address) but far below what bulk enumeration needs.
+const emailCheckLimiter = limiter(
+  Number(process.env.RATE_LIMIT_EMAIL_CHECK) || 120,
+  15 * 60 * 1000,
+  'Too many lookups. Wait a minute and try again.'
+);
+
 const reportLimiter = limiter(
   Number(process.env.RATE_LIMIT_REPORTS) || 40,
   60 * 60 * 1000,
@@ -163,6 +174,7 @@ global.mongodb = mongoose;
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+app.use('/api/auth/check-email', emailCheckLimiter);
 app.use('/api/auth', authLimiter, require('./routes/auth.routes'));
 app.use('/api/organizations', require('./routes/organizations.routes'));
 app.use('/api/companies', require('./routes/companies.routes'));

@@ -68,13 +68,25 @@ export interface EmployeeSignupPayload {
   region?: string;
 }
 
+export interface DemoRequestPayload {
+  email: string;
+  phone: string;
+  fullName?: string;
+  companyName?: string;
+  notes?: string;
+}
+
 export const authAPI = {
   registerOrganization: (data: OrgRegistrationPayload) =>
     API.post('/auth/register-organization', data),
   register: (data: EmployeeSignupPayload) => API.post('/auth/register', data),
   lookupDomain: (email: string) =>
     API.get('/auth/organization-by-domain', { params: { email } }),
+  // Which of the three login-screen doors this address gets: 'ready',
+  // 'no_account' or 'not_registered'
+  checkEmail: (email: string) => API.get('/auth/check-email', { params: { email } }),
   login: (email: string, password: string) => API.post('/auth/login', { email, password }),
+  requestDemo: (data: DemoRequestPayload) => API.post('/auth/demo-request', data),
   getMe: () => API.get('/auth/me'),
   updateProfile: (data: Partial<EmployeeSignupPayload>) => API.patch('/auth/profile', data),
 };

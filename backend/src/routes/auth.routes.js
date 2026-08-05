@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Organization = require('../models/Organization');
+const DemoRequest = require('../models/DemoRequest');
 const {
   authenticate,
   resolveOrganizationByEmail,
@@ -183,6 +184,51 @@ router.get('/organization-by-domain', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Email triage - the login screen calls this as the address is typed, and the
+// answer decides which of the three doors the visitor is shown: the password
+// box, "ask your admin", or the demo form. Doing it here rather than after a
+// password attempt means nobody types a password only to be told they have no
+// account.
+//
+// It reports whether an address has an account, which is why it is rate limited
+// separately in server.js: the product needs the distinction, but not at a
+// speed that makes bulk enumeration practical.
+// ---------------------------------------------------------------------------
+router.get('/check-email', async (req, res) => {
+  try {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    const domain = domainFromEmail(email);
+
+    if (!domain || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Enter a valid work email address' });
+    }
+
+    const organization = await Organization.findOne({ domains: domain });
+
+    if (!organization) {
+      return res.json({ status: 'not_registered', domain });
+    }
+
+    // Only existence is checked here - nothing about the account is returned,
+    // and the password is still verified by /login as usual.
+    const hasAccount = await User.exists({ email });
+
+    if (!hasAccount) {
+      return res.json({
+        status: 'no_account',
+        domain,
+        organizationName: organization.name,
+      });
+    }
+
+    res.json({ status: 'ready', domain, organizationName: organization.name });
+  } catch (error) {
+    console.error('Email check error:', error);
+    res.status(500).json({ error: 'Could not check that email. Please try again.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Employee signup - only possible once their company is registered
 // ---------------------------------------------------------------------------
 router.post('/register', resolveOrganizationByEmail, async (req, res) => {
@@ -270,8 +316,38 @@ router.post('/login', async (req, res) => {
     const normalizedEmail = String(email).trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
 
-    // Same message either way so the endpoint cannot be used to enumerate users
-    if (!user || !(await user.comparePassword(password))) {
+    // Sign-in is the only door into the product, so when there is no account
+    // behind the address the response has to say what the next step is. The two
+    // outcomes are decided by the email's domain, not by the person: either the
+    // company already subscribes (their admin adds the seat) or it does not
+    // (they book a demo). Deliberate trade-off: it confirms that an address has
+    // no account here, which the previous blanket message hid.
+    if (!user) {
+      const domain = domainFromEmail(normalizedEmail);
+
+      if (!domain) {
+        return res.status(400).json({ error: 'Enter a valid email address' });
+      }
+
+      const registeredOrg = await Organization.findOne({ domains: domain });
+
+      if (registeredOrg) {
+        return res.status(403).json({
+          error: `${registeredOrg.name} is already on SalesMotion, but there is no account for this email yet. Ask your admin to add you.`,
+          code: 'ACCOUNT_NOT_PROVISIONED',
+          organizationName: registeredOrg.name,
+          domain,
+        });
+      }
+
+      return res.status(404).json({
+        error: `No SalesMotion subscription is registered for @${domain}.`,
+        code: 'COMPANY_NOT_REGISTERED',
+        domain,
+      });
+    }
+
+    if (!(await user.comparePassword(password))) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -295,6 +371,73 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Demo request - the login screen's dead end for someone whose company has not
+// registered yet. Lands in the DemoRequest collection for sales to follow up.
+// ---------------------------------------------------------------------------
+router.post('/demo-request', async (req, res) => {
+  try {
+    const { email, phone, fullName, companyName, notes } = req.body;
+
+    if (!email || !phone) {
+      return res.status(400).json({ error: 'Work email and phone number are required' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const domain = domainFromEmail(normalizedEmail);
+
+    if (!domain || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Enter a valid work email address' });
+    }
+
+    // Loose on purpose: country codes, spaces, dashes and brackets are all fine.
+    // We only insist on enough digits to be dialable, so a valid international
+    // number is never rejected by an over-tight pattern.
+    const phoneDigits = String(phone).replace(/\D/g, '');
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      return res.status(400).json({ error: 'Enter a valid phone number we can reach you on' });
+    }
+
+    // Someone hitting the button twice should not create two leads. Reuse the
+    // open request for this address and note that they asked again.
+    const existing = await DemoRequest.findOne({
+      email: normalizedEmail,
+      status: { $in: ['new', 'contacted'] },
+    });
+
+    if (existing) {
+      existing.phone = String(phone).trim();
+      if (fullName) existing.fullName = String(fullName).trim();
+      if (companyName) existing.companyName = String(companyName).trim();
+      if (notes) existing.notes = String(notes).trim();
+      existing.requestCount += 1;
+      await existing.save();
+
+      return res.status(200).json({
+        message: 'Request received',
+        alreadyRequested: true,
+      });
+    }
+
+    await DemoRequest.create({
+      email: normalizedEmail,
+      phone: String(phone).trim(),
+      domain,
+      fullName: fullName ? String(fullName).trim() : undefined,
+      companyName: companyName ? String(companyName).trim() : undefined,
+      notes: notes ? String(notes).trim() : undefined,
+      source: 'login_page',
+    });
+
+    // No lead details echoed back - the client already has everything it needs
+    // to render the confirmation, and this endpoint is unauthenticated.
+    res.status(201).json({ message: 'Request received', alreadyRequested: false });
+  } catch (error) {
+    console.error('Demo request error:', error);
+    res.status(500).json({ error: 'Could not save your request. Please try again.' });
   }
 });
 
