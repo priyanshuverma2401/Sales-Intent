@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Building2, Save, Sparkles, Users } from 'lucide-react';
+import { Building2, Plug, Save, Sparkles, Users } from 'lucide-react';
 import { apiError, authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { Alert, Button, Card, Field, PageHeader, TagInput, cx } from '../components/ui';
 import CompanyProfilePanel from '../components/CompanyProfilePanel';
+import IntegrationsPanel from '../components/IntegrationsPanel';
 import UsersPanel from '../components/UsersPanel';
 import {
   DEPARTMENT_SUGGESTIONS,
@@ -13,7 +14,7 @@ import {
   capabilitySuggestionsFor,
 } from '../lib/taxonomy';
 
-type TabId = 'focus' | 'company' | 'users';
+type TabId = 'focus' | 'company' | 'users' | 'integrations';
 
 export default function SettingsPage() {
   const { user, organization, setUser, setOrganization } = useAuthStore();
@@ -26,6 +27,8 @@ export default function SettingsPage() {
     { id: 'focus', label: 'Your focus', icon: Sparkles },
     { id: 'company', label: 'Company profile', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
+    // Admin-only: a CRM connection exposes the whole tenant's pipeline
+    ...(isAdmin ? [{ id: 'integrations' as TabId, label: 'Integrations', icon: Plug }] : []),
   ];
 
   return (
@@ -87,6 +90,10 @@ export default function SettingsPage() {
 
       {tab === 'users' && (
         <UsersPanel actor={user} organization={organization} onMessage={setMessage} />
+      )}
+
+      {tab === 'integrations' && isAdmin && (
+        <IntegrationsPanel canEdit={isAdmin} onMessage={setMessage} />
       )}
     </div>
   );

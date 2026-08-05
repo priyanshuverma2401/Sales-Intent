@@ -9,6 +9,19 @@ const signalSchema = new mongoose.Schema({
   companyName: String,
   ticker: String,
 
+  // Signals derived from public sources are shared by every tenant watching the
+  // company. Signals derived from a tenant's own CRM are not: they carry the
+  // owning organization and are only ever served back to it.
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    index: true,
+  },
+
+  // Stable identity for a CRM-derived signal ("this deal moved to this stage"),
+  // so a re-sync updates the existing row instead of duplicating it.
+  crmKey: { type: String, index: true, sparse: true },
+
   // Signal Details
   type: {
     type: String,
@@ -24,6 +37,7 @@ const signalSchema = new mongoose.Schema({
       'partnership',
       'documents',
       'podcasts',
+      'crm',
     ],
     required: true,
   },

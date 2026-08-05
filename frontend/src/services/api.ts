@@ -120,6 +120,31 @@ export const organizationsAPI = {
   setRole: (id: string, role: string) => API.patch(`/organizations/members/${id}/role`, { role }),
 };
 
+export interface CrmCredentials {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  loginUrl?: string;    // salesforce
+  accountsUrl?: string; // zoho
+}
+
+export const integrationsAPI = {
+  get: () => API.get('/integrations'),
+  connect: (provider: string, credentials: CrmCredentials) =>
+    API.post(`/integrations/${provider}/connect`, credentials),
+  test: (provider: string) => API.post(`/integrations/${provider}/test`),
+  // Kicks off a background sync of every watched account
+  sync: (provider: string) => API.post(`/integrations/${provider}/sync`),
+  syncCompany: (provider: string, companyId: string) =>
+    API.post(`/integrations/${provider}/sync/${companyId}`),
+  update: (
+    provider: string,
+    data: { usage?: { reports?: boolean; signals?: boolean; score?: boolean }; freshnessHours?: number }
+  ) => API.patch(`/integrations/${provider}`, data),
+  disconnect: (provider: string) => API.delete(`/integrations/${provider}`),
+  record: (companyId: string) => API.get(`/integrations/records/${companyId}`),
+};
+
 export const companiesAPI = {
   search: (q: string) => API.get('/companies/search', { params: { q } }),
   getWatchlist: () => API.get('/companies'),

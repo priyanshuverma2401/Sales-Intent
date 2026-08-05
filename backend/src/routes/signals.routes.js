@@ -11,6 +11,21 @@ async function watchedCompanyIds(userId) {
   return (user?.watchlist || []).map(w => w.companyId).filter(Boolean);
 }
 
+// Signals from public sources carry no organizationId and are shared by every
+// tenant watching the company. CRM-derived signals carry one and must only ever
+// reach the tenant they came from, so every query is scoped through this.
+function ownedByTenant(signal, req) {
+  if (!signal.organizationId) return true;
+  return String(signal.organizationId) === String(req.organization?._id);
+}
+
+function tenantScope(req) {
+  const orgId = req.organization?._id;
+  return orgId
+    ? { $or: [{ organizationId: { $exists: false } }, { organizationId: null }, { organizationId: orgId }] }
+    : { $or: [{ organizationId: { $exists: false } }, { organizationId: null }] };
+}
+
 // Get signals for watched companies
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -28,6 +43,7 @@ router.get('/', authenticate, async (req, res) => {
     const filter = {
       companyId: { $in: watchedIds },
       createdAt: { $gte: dateFilter },
+      ...tenantScope(req),
     };
 
     // Narrow to a single company only if it is one the user actually watches
@@ -60,7 +76,7 @@ router.get('/stats/by-category', authenticate, async (req, res) => {
     dateFilter.setDate(dateFilter.getDate() - 7);
 
     const stats = await Signal.aggregate([
-      { $match: { companyId: { $in: watchedIds }, createdAt: { $gte: dateFilter } } },
+      { $match: { companyId: { $in: watchedIds }, createdAt: { $gte: dateFilter }, ...tenantScope(req) } },
       { $group: { _id: '$type', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
     ]);
@@ -90,6 +106,7 @@ router.get('/categories/:category', authenticate, async (req, res) => {
       companyId: { $in: watchedIds },
       type: category,
       createdAt: { $gte: dateFilter },
+      ...tenantScope(req),
     })
       .sort({ createdAt: -1 })
       .limit(50);
@@ -109,9 +126,10 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Signal not found' });
     }
 
-    // Only expose signals belonging to a watched company
+    // Only expose signals belonging to a watched company - and, for a signal
+    // derived from a CRM, only to the tenant whose CRM it came from
     const watchedIds = await watchedCompanyIds(req.user._id);
-    if (!watchedIds.some(id => id.toString() === signal.companyId.toString())) {
+    if (!watchedIds.some(id => id.toString() === signal.companyId.toString()) || !ownedByTenant(signal, req)) {
       return res.status(403).json({ error: 'Not authorized to view this signal' });
     }
 
@@ -134,7 +152,7 @@ router.patch('/:id/read', authenticate, async (req, res) => {
     }
 
     const watchedIds = await watchedCompanyIds(req.user._id);
-    if (!watchedIds.some(id => id.toString() === signal.companyId.toString())) {
+    if (!watchedIds.some(id => id.toString() === signal.companyId.toString()) || !ownedByTenant(signal, req)) {
       return res.status(403).json({ error: 'Not authorized to modify this signal' });
     }
 

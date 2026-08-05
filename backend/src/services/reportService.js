@@ -3,6 +3,7 @@ const Inbox = require('../models/Inbox');
 const intelligenceService = require('./intelligenceService');
 const reportGenerator = require('./reportGenerator');
 const aiEngine = require('./aiEngine');
+const crmService = require('./crm');
 
 /**
  * Owns the "generate a report" use case so both the accounts route (auto-run on
@@ -131,7 +132,7 @@ class ReportService {
     await report.save();
 
     setImmediate(() => {
-      this.run(report, { company, seller, profile, user }).catch(async (error) => {
+      this.run(report, { company, seller, profile, user, organization }).catch(async (error) => {
         console.error('❌ Report generation failed:', error);
 
         // Written with updateOne rather than report.save(): if the failure was a
@@ -154,7 +155,7 @@ class ReportService {
   }
 
   /** The pipeline itself. Persists progress so the UI can show a live step. */
-  async run(report, { company, seller, profile, user }) {
+  async run(report, { company, seller, profile, user, organization }) {
     console.log(`\n📄 Generating report for ${company.name} (lens: ${profile.keywords?.join(', ') || 'capabilities only'})`);
 
     // Progress is written straight to the collection. Firing report.save() while
@@ -165,10 +166,19 @@ class ReportService {
       Report.updateOne({ _id: report._id }, { $set: { progress: { step, percent } } }).catch(() => {});
     };
 
+    // The tenant's own CRM, when one is connected. contextFor never throws: a
+    // CRM outage degrades the report to public evidence instead of failing it.
+    setProgress('Reading your CRM', 8);
+    const crm = await crmService.contextFor(organization, company);
+    if (crm) {
+      console.log(`   ↳ CRM matched: ${crm.openOpportunities?.length || 0} open deal(s), ${crm.contacts?.length || 0} contact(s)`);
+    }
+
     const result = await intelligenceService.buildIntelligence({
       company,
       seller,
       profile,
+      crm,
       onProgress: setProgress,
     });
 

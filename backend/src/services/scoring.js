@@ -2,12 +2,24 @@
 // Deliberately transparent arithmetic rather than an AI guess, so the number is
 // stable between runs and the reasons can be shown to the user.
 
-const WEIGHTS = {
+const BASE_WEIGHTS = {
   keywordFit: 35,       // does their public activity match what we pitch
   buyingSignals: 20,    // earnings/M&A/funding/executive events
   hiringSignals: 20,    // are they hiring into the departments we sell to
   newsMomentum: 15,     // is anything happening at all, recently
   financialContext: 10, // can they fund it
+};
+
+// When the tenant's CRM knows this account, what they already have with it
+// outranks anything inferred from the public web - so the public components are
+// scaled back to make room rather than the total being inflated past 100.
+const CRM_WEIGHTS = {
+  keywordFit: 30,
+  buyingSignals: 18,
+  hiringSignals: 15,
+  newsMomentum: 12,
+  financialContext: 10,
+  crmSignals: 15,       // open pipeline, engagement recency, relationship depth
 };
 
 const BUYING_SIGNAL_WORDS = [
@@ -65,15 +77,74 @@ function clamp(value, max) {
 }
 
 /**
+ * The CRM half of the score. Three things move it: money already in play, how
+ * recently anyone spoke to them, and how deep the relationship goes.
+ * Returns { points, reasons } against CRM_WEIGHTS.crmSignals.
+ */
+function scoreCrm(crm, weight) {
+  const reasons = [];
+  let points = 0;
+
+  const open = crm.openOpportunities || [];
+  const pipeline = crm.openPipeline || 0;
+
+  if (open.length) {
+    points += Math.min(open.length * 2, 5);
+    points += pipeline >= 1e6 ? 4 : pipeline >= 1e5 ? 3 : pipeline > 0 ? 1.5 : 0;
+
+    const nearest = open
+      .map(o => o.closeDate)
+      .filter(Boolean)
+      .sort((a, b) => new Date(a) - new Date(b))[0];
+
+    reasons.push(
+      `${open.length} open ${open.length === 1 ? 'deal' : 'deals'} in your CRM` +
+        (pipeline ? ` worth ${Math.round(pipeline).toLocaleString()}` : '') +
+        (nearest ? `, next close ${new Date(nearest).toISOString().slice(0, 10)}` : '')
+    );
+  }
+
+  if (crm.wonOpportunities?.length) {
+    points += 2.5;
+    reasons.push(`Existing customer — ${crm.wonOpportunities.length} closed-won deal(s) on record`);
+  } else if (crm.account?.type) {
+    reasons.push(`CRM account type: ${crm.account.type}`);
+  }
+
+  // Recency cuts both ways: a live conversation is worth points, a cold account
+  // with open pipeline is exactly the account a rep should be told about.
+  const days = crm.lastActivityAt ? daysSince(crm.lastActivityAt) : Infinity;
+  if (days <= 14) {
+    points += 3;
+    reasons.push(`Active in the CRM in the last ${Math.max(1, Math.round(days))} days`);
+  } else if (days <= 60) {
+    points += 1.5;
+  } else if (Number.isFinite(days) && open.length) {
+    reasons.push(`No CRM activity for ${Math.round(days)} days despite open pipeline`);
+  }
+
+  if ((crm.contacts?.length || 0) >= 3) {
+    points += 1.5;
+    reasons.push(`${crm.contacts.length} contacts mapped in the CRM`);
+  }
+
+  return { points: clamp(points, weight), reasons };
+}
+
+/**
  * @param {object} input
  * @param {object} input.company    prospect record
  * @param {Array}  input.news       normalised news articles
  * @param {Array}  input.jobs       open positions
  * @param {object} input.profile    seller profile (keywords, vertical caps, target departments)
  * @param {object} input.seller     organization (capabilities)
+ * @param {object} [input.crm]      CrmRecord.toContext(), when a CRM is connected
  */
-function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller = {} }) {
+function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller = {}, crm = null }) {
   const reasons = [];
+  // Every component below is capped against this set, so connecting a CRM
+  // rebalances the score rather than adding a sixth component on top of 100.
+  const WEIGHTS = crm?.matched !== false && crm ? CRM_WEIGHTS : BASE_WEIGHTS;
   const keywords = (profile.keywords || []).filter(Boolean);
   const capabilities = [
     ...(profile.verticalCapabilities || []),
@@ -173,12 +244,22 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
   if (company.employees >= 10000) financialContext += 2;
   financialContext = clamp(financialContext, WEIGHTS.financialContext);
 
+  // --- 6. CRM signals (only when a CRM is connected and matched) -----------
+  let crmSignals = 0;
+  if (WEIGHTS.crmSignals) {
+    const scored = scoreCrm(crm, WEIGHTS.crmSignals);
+    crmSignals = scored.points;
+    // Put the CRM reasons first: they are the ones the rep can act on today
+    reasons.unshift(...scored.reasons);
+  }
+
   const breakdown = {
     keywordFit: Math.round(keywordFit),
     buyingSignals: Math.round(buyingSignals),
     hiringSignals: Math.round(hiringSignals),
     newsMomentum: Math.round(newsMomentum),
     financialContext: Math.round(financialContext),
+    ...(WEIGHTS.crmSignals ? { crmSignals: Math.round(crmSignals) } : {}),
   };
 
   const value = Math.max(
@@ -195,4 +276,4 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
   return { value, band, breakdown, reasons: reasons.slice(0, 6), weights: WEIGHTS };
 }
 
-module.exports = { scoreAccount, WEIGHTS };
+module.exports = { scoreAccount, WEIGHTS: BASE_WEIGHTS, CRM_WEIGHTS };

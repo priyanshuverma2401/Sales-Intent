@@ -44,6 +44,8 @@ const reportSchema = new mongoose.Schema({
       hiringSignals: Number,
       newsMomentum: Number,
       financialContext: Number,
+      // Only present when the tenant had a CRM connected at generation time
+      crmSignals: Number,
     },
   },
 

@@ -183,6 +183,7 @@ app.use('/api/reports', reportLimiter, require('./routes/reports.routes'));
 app.use('/api/accounts', require('./routes/accounts.routes'));
 app.use('/api/alerts', require('./routes/alerts.routes'));
 app.use('/api/inbox', require('./routes/inbox.routes'));
+app.use('/api/integrations', require('./routes/integrations.routes'));
 
 // Health check. Render polls this; a 503 marks the instance unhealthy and gets
 // it replaced, which is the point — an instance with no database can still

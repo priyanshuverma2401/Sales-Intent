@@ -221,9 +221,10 @@ class IntelligenceService {
    * @param {object} opts.company  prospect document
    * @param {object} opts.seller   organization.toSellerContext()
    * @param {object} opts.profile  user.toSellerProfile(overrideKeywords)
+   * @param {object} [opts.crm]     CrmRecord.toContext(), when a CRM is connected
    * @param {function} [opts.onProgress] (step, percent) => void
    */
-  async buildIntelligence({ company, seller, profile, onProgress = () => {} }) {
+  async buildIntelligence({ company, seller, profile, crm = null, onProgress = () => {} }) {
     const keywords = profile.keywords || [];
 
     onProgress('Gathering news, filings and hiring data', 10);
@@ -236,6 +237,7 @@ class IntelligenceService {
       jobs: evidence.jobs,
       profile,
       seller,
+      crm,
     });
 
     const sources = this.buildSources(evidence, company);
@@ -254,7 +256,7 @@ class IntelligenceService {
       },
     };
 
-    const context = aiEngine.buildContext({ seller, profile, prospect });
+    const context = aiEngine.buildContext({ seller, profile, prospect, crm });
 
     // The brief is generated first because the value section builds on it. The
     // two research passes are independent, so they ride alongside it.

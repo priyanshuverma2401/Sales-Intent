@@ -183,10 +183,61 @@ class AIEngine {
   }
 
   /**
+   * What the seller's own CRM holds on this prospect. This is first-party truth
+   * rather than inference, so the prompt says so explicitly - the model must not
+   * contradict it or re-derive facts it has been handed.
+   */
+  crmBlock(crm, prospectName) {
+    if (!crm?.matched) return '';
+
+    const money = value =>
+      typeof value === 'number' && Number.isFinite(value) ? Math.round(value).toLocaleString() : null;
+
+    const deals = (crm.openOpportunities || []).slice(0, 8).map(o =>
+      `  - ${o.name} | stage: ${o.stage || 'unset'}${o.amount ? ` | ${money(o.amount)}` : ''}` +
+      `${o.closeDate ? ` | closes ${new Date(o.closeDate).toISOString().slice(0, 10)}` : ''}` +
+      `${o.nextStep ? ` | next step: ${o.nextStep}` : ''}`
+    );
+
+    const contacts = (crm.contacts || []).slice(0, 10).map(c =>
+      `  - ${c.name}${c.title ? `, ${c.title}` : ''}${c.department ? ` (${c.department})` : ''}`
+    );
+
+    const activities = (crm.activities || []).slice(0, 8).map(a =>
+      `  - ${a.occurredAt ? `${new Date(a.occurredAt).toISOString().slice(0, 10)}: ` : ''}` +
+      `${a.subject || a.kind}${a.summary ? ` — ${a.summary.slice(0, 160)}` : ''}`
+    );
+
+    const daysSinceActivity = crm.lastActivityAt
+      ? Math.round((Date.now() - new Date(crm.lastActivityAt).getTime()) / 86400000)
+      : null;
+
+    return `
+=== WHAT THE SELLER'S OWN CRM SAYS (first-party, authoritative) ===
+Source: ${crm.provider === 'zoho' ? 'Zoho CRM' : 'Salesforce'}, synced ${new Date(crm.fetchedAt).toISOString().slice(0, 10)}
+Account owner: ${crm.account?.owner || 'unassigned'}${crm.account?.type ? ` | relationship: ${crm.account.type}` : ''}${crm.account?.rating ? ` | rating: ${crm.account.rating}` : ''}
+Open pipeline: ${money(crm.openPipeline) || '0'} across ${crm.openOpportunities?.length || 0} deal(s)
+Closed-won history: ${crm.wonOpportunities?.length || 0} deal(s)
+Last logged activity: ${daysSinceActivity === null ? 'never' : `${daysSinceActivity} days ago`}
+${deals.length ? `Open deals:\n${deals.join('\n')}` : 'No open deals recorded.'}
+${contacts.length ? `Known contacts:\n${contacts.join('\n')}` : ''}
+${activities.length ? `Recent CRM activity:\n${activities.join('\n')}` : ''}
+
+Rules for using this:
+  - Treat it as fact. Never contradict it, and never describe ${prospectName} as a cold prospect
+    if there is open pipeline or closed-won history above.
+  - Write to the actual position: an open deal means advance it (what unblocks the current stage),
+    an existing customer means expand it, no deals means create the opening.
+  - Name the account owner's live deals and known contacts where they are relevant, and tie the
+    public evidence below back to them.
+  - If CRM activity is stale but pipeline is open, call that out as a risk.`.trim();
+  }
+
+  /**
    * The block every prompt shares. Repeating the lens in each call is what keeps
    * a four-call report coherent instead of four unrelated essays.
    */
-  buildContext({ seller, profile, prospect }) {
+  buildContext({ seller, profile, prospect, crm = null }) {
     const keywords = (profile.keywords || []).filter(Boolean);
 
     return `
@@ -224,6 +275,8 @@ Employees: ${prospect.employees ? Number(prospect.employees).toLocaleString() : 
 Website: ${prospect.website || 'unknown'}
 About: ${(prospect.description || 'no description available').slice(0, 900)}
 Financials: market cap ${this.money(prospect.financials?.marketCap)}, revenue ${this.money(prospect.financials?.revenue)}, revenue growth ${prospect.financials?.revenueGrowth ?? 'n/a'}%, P/E ${prospect.financials?.peRatio ?? 'n/a'}
+
+${this.crmBlock(crm, prospect.name)}
 `.trim();
   }
 
