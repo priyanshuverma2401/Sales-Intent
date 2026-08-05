@@ -91,10 +91,32 @@ export const authAPI = {
   updateProfile: (data: Partial<EmployeeSignupPayload>) => API.patch('/auth/profile', data),
 };
 
+export interface NewMemberPayload {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  jobTitle?: string;
+  role?: 'admin' | 'member';
+}
+
+export interface MemberUpdatePayload {
+  firstName?: string;
+  lastName?: string;
+  jobTitle?: string;
+  role?: 'admin' | 'member';
+  emailAlerts?: boolean;
+  password?: string;
+}
+
 export const organizationsAPI = {
   get: () => API.get('/organizations/me'),
   update: (data: any) => API.patch('/organizations/me', data),
-  members: () => API.get('/organizations/members'),
+  members: (params?: { q?: string }) => API.get('/organizations/members', { params }),
+  addMember: (data: NewMemberPayload) => API.post('/organizations/members', data),
+  updateMember: (id: string, data: MemberUpdatePayload) =>
+    API.patch(`/organizations/members/${id}`, data),
+  removeMember: (id: string) => API.delete(`/organizations/members/${id}`),
   setRole: (id: string, role: string) => API.patch(`/organizations/members/${id}/role`, { role }),
 };
 

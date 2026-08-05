@@ -156,6 +156,33 @@ class AIEngine {
   }
 
   /**
+   * The long-form answers an admin writes on the company profile. Only the
+   * sections that were filled in are emitted, and each is trimmed so a verbose
+   * profile cannot crowd the prospect evidence out of the context window.
+   */
+  sellerNarrative(seller, maxChars = 1200) {
+    const sections = [
+      ['Product features and capabilities', seller.productFeatures],
+      ['Problems, pains and challenges they solve', seller.problemsSolved],
+      ['Outcomes and benefits delivered', seller.outcomesDelivered],
+      ['Competitors and differentiation', seller.competitorsDifferentiation],
+      ['Case studies and testimonials', seller.caseStudies],
+      ['Industry terminology to use', seller.industryTerminology],
+    ]
+      .filter(([, body]) => String(body || '').trim())
+      .map(([label, body]) => `${label}: ${String(body).replace(/\s+/g, ' ').trim().slice(0, maxChars)}`);
+
+    const monitoring = [
+      seller.relevantTopics?.length ? `Topics they monitor: ${this.list(seller.relevantTopics)}` : '',
+      seller.relevantTechnologies?.length ? `Technologies they care about: ${this.list(seller.relevantTechnologies)}` : '',
+      seller.relevantContactTitles?.length ? `Buying-committee titles they track: ${this.list(seller.relevantContactTitles)}` : '',
+      seller.relevantHiringTitles?.length ? `Hiring titles they treat as a signal: ${this.list(seller.relevantHiringTitles)}` : '',
+    ].filter(Boolean);
+
+    return [...sections, ...monitoring].join('\n');
+  }
+
+  /**
    * The block every prompt shares. Repeating the lens in each call is what keeps
    * a four-call report coherent instead of four unrelated essays.
    */
@@ -170,7 +197,7 @@ Company capabilities they can deliver: ${this.list(seller.capabilities)}
 ${seller.capabilityNotes ? `Capability detail: ${seller.capabilityNotes}` : ''}
 Company value propositions: ${this.list(seller.valuePropositions)}
 Proof points / differentiators: ${this.list([...(seller.proofPoints || []), ...(seller.differentiators || [])])}
-
+${this.sellerNarrative(seller)}
 Sales rep: ${profile.name}${profile.jobTitle ? `, ${profile.jobTitle}` : ''}
 Vertical they sell into: ${profile.vertical || seller.industry || 'not specified'}
 Capabilities they sell in that vertical: ${this.list(profile.verticalCapabilities)}

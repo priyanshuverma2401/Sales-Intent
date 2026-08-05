@@ -1,5 +1,25 @@
 const mongoose = require('mongoose');
 
+// A tracked title (contact or hiring) plus the keywords that qualify it, e.g.
+// "Director" + ["AI", "Automation", "Operations"].
+const titleRuleSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    keywords: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+// A monitored topic. `high` priority topics are the ones the signal feed lifts
+// to the top, which is why they are flagged rather than just ordered.
+const topicSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    priority: { type: String, enum: ['normal', 'high'], default: 'normal' },
+  },
+  { _id: false }
+);
+
 // A subscribing customer. One Organization owns many employee Users, and every
 // account/report those users create is scoped to it. The capability fields are
 // the seller-side half of the report prompt: what this company can actually
@@ -39,6 +59,23 @@ const organizationSchema = new mongoose.Schema({
   targetIndustries: [String],
   targetDepartments: [String],
   targetRoles: [String],
+
+  // --- Company profile, admin-managed --------------------------------------
+  // Monitoring rules: which people, subjects and stacks are worth a signal at a
+  // target account. Set once by an owner/admin, used by every seat.
+  relevantContactTitles: { type: [titleRuleSchema], default: [] },
+  relevantHiringTitles: { type: [titleRuleSchema], default: [] },
+  relevantTopics: { type: [topicSchema], default: [] },
+  relevantTechnologies: { type: [String], default: [] },
+
+  // The long-form narrative an admin writes once. `description` above is the
+  // company overview; these are the rest of the answers a report can quote.
+  productFeatures: String,
+  problemsSolved: String,
+  outcomesDelivered: String,
+  competitorsDifferentiation: String,
+  caseStudies: String,
+  industryTerminology: String,
 
   subscription: {
     plan: { type: String, enum: ['trial', 'starter', 'growth', 'enterprise'], default: 'trial' },
@@ -84,7 +121,27 @@ organizationSchema.methods.toSellerContext = function () {
     targetIndustries: this.targetIndustries || [],
     targetDepartments: this.targetDepartments || [],
     targetRoles: this.targetRoles || [],
+
+    productFeatures: this.productFeatures,
+    problemsSolved: this.problemsSolved,
+    outcomesDelivered: this.outcomesDelivered,
+    competitorsDifferentiation: this.competitorsDifferentiation,
+    caseStudies: this.caseStudies,
+    industryTerminology: this.industryTerminology,
+
+    relevantTopics: (this.relevantTopics || []).map(t => t.name),
+    relevantTechnologies: this.relevantTechnologies || [],
+    // Titles are flattened to "Director (AI, Automation)" so the prompt reads
+    // as prose rather than nested JSON.
+    relevantContactTitles: flattenTitles(this.relevantContactTitles),
+    relevantHiringTitles: flattenTitles(this.relevantHiringTitles),
   };
 };
+
+function flattenTitles(rules) {
+  return (rules || []).map(r =>
+    r.keywords?.length ? `${r.title} (${r.keywords.join(', ')})` : r.title
+  );
+}
 
 module.exports = mongoose.model('Organization', organizationSchema);
