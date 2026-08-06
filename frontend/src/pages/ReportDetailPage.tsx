@@ -1,15 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
+  Banknote,
+  BarChart3,
   Building2,
+  CalendarClock,
+  CalendarDays,
   Download,
-  ExternalLink,
+  Factory,
+  Globe,
+  Linkedin,
   Loader2,
+  MapPin,
   Printer,
   RefreshCw,
   Sparkles,
+  TrendingUp,
+  User,
+  Users,
 } from 'lucide-react';
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
 import { Alert, Button, Card, ScoreRing, Spinner, cx } from '../components/ui';
@@ -42,12 +52,58 @@ const CHAPTERS = [
   { id: 'ch-sources', label: 'Sources', blurb: 'Every reference cited above.' },
 ] as const;
 
-function money(value?: number) {
+// Revenue is reported in whatever the company files in - a London bank in
+// pounds, a Bengaluru one in rupees - so an amount is only readable next to the
+// currency it was stated in. Market cap, which arrives from Finnhub in dollars,
+// keeps the dollar default.
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  CNY: '¥',
+  INR: '₹',
+  KRW: '₩',
+};
+
+function money(value?: number, currency?: string) {
   if (!value) return null;
-  if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-  return `$${value.toLocaleString()}`;
+
+  const symbol = currency ? CURRENCY_SYMBOLS[currency] ?? `${currency} ` : '$';
+
+  if (value >= 1e12) return `${symbol}${(value / 1e12).toFixed(2)}T`;
+  if (value >= 1e9) return `${symbol}${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `${symbol}${(value / 1e6).toFixed(1)}M`;
+  return `${symbol}${value.toLocaleString()}`;
+}
+
+// Quick links are stored as plain label/url pairs, so the mark that belongs
+// beside one has to be inferred from what it points at
+function linkIcon(link: { label?: string; url?: string }) {
+  const text = `${link.label || ''} ${link.url || ''}`.toLowerCase();
+  if (text.includes('linkedin')) return Linkedin;
+  if (text.includes('crunchbase')) return Building2;
+  if (text.includes('finance.yahoo') || text.includes('yahoo finance')) return BarChart3;
+  return Globe;
+}
+
+// "STAN on Yahoo Finance" is how the link is stored; the cover shows the ticker
+function linkLabel(link: { label?: string }) {
+  return String(link.label || '').replace(/\s+on\s+Yahoo Finance$/i, '');
+}
+
+function day(value: string | Date) {
+  return new Date(value).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+// A report can be regenerated more than once in a day, so the time is what
+// makes "last refreshed" mean anything
+function clock(value: string | Date) {
+  return new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function ReportDetailPage() {
@@ -59,6 +115,9 @@ export default function ReportDetailPage() {
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string>(CHAPTERS[0].id);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [descriptionClamped, setDescriptionClamped] = useState(false);
+  const descriptionRef = useRef<HTMLParagraphElement>(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -111,7 +170,47 @@ export default function ReportDetailPage() {
     return () => observer.disconnect();
   }, [report?.status]);
 
+  // "Show more" only earns its place when the text is genuinely cut off, and
+  // whether it is depends on the column width - a short profile fits inside the
+  // clamp on a wide screen and overflows it on a narrow one. So it is measured
+  // rather than guessed at from a character count.
+  useEffect(() => {
+    if (descriptionOpen) return;
+
+    const measure = () => {
+      const el = descriptionRef.current;
+      if (el) setDescriptionClamped(el.scrollHeight > el.clientHeight + 1);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [report?.fastFacts?.description, report?.status, descriptionOpen]);
+
   const sources = useMemo(() => report?.sources || [], [report]);
+
+  // The homepage belongs in Quick Links, and buildQuickLinks puts it there -
+  // but only for accounts that had a website stored when the report ran. Any
+  // report written before that carries the address in fastFacts and nowhere
+  // else, so it is merged in here rather than left off the cover.
+  const quickLinks = useMemo(() => {
+    const links = [...(report?.quickLinks || [])];
+    const website = report?.fastFacts?.website;
+    if (!website) return links;
+
+    const host = (url?: string) =>
+      String(url || '')
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .split('/')[0]
+        .toLowerCase();
+
+    if (!links.some((link: any) => host(link.url) === host(website))) {
+      links.unshift({ label: host(website), url: website });
+    }
+
+    return links;
+  }, [report]);
 
   const download = async () => {
     if (!id) return;
@@ -146,6 +245,22 @@ export default function ReportDetailPage() {
   if (!report) return null;
 
   const facts = report.fastFacts || {};
+
+  // 'Unknown' is the placeholder a company is stored with when no country was
+  // resolved at the time it was added. It should read as absent rather than as
+  // a place: "Headquartered in Unknown" is worse than no line at all.
+  const headquarters = String(facts.headquarters || '')
+    .split(',')
+    .map((part: string) => part.trim())
+    .filter((part: string) => part && part.toLowerCase() !== 'unknown')
+    .join(', ');
+
+  // Regenerating writes a fresh report rather than editing this one, so for any
+  // given report the two are usually minutes apart - lastUpdatedAt is the moment
+  // the pipeline finished writing it, and is absent only on reports that failed
+  // part-way through.
+  const lastRefreshed = report.lastUpdatedAt || report.generatedAt;
+
   const context = report.context || {};
   const brief = report.executiveBrief || {};
   const research = report.research || {};
@@ -275,27 +390,6 @@ export default function ReportDetailPage() {
                   </p>
                 </div>
               </div>
-
-              {facts.description && (
-                <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
-                  {facts.description.length > 420
-                    ? `${facts.description.slice(0, 420).trim()}…`
-                    : facts.description}
-                </p>
-              )}
-
-              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-                {facts.industry && (
-                  <Fact label="Industry" value={facts.industry} />
-                )}
-                {facts.headquarters && <Fact label="Headquarters" value={facts.headquarters} />}
-                {facts.employees ? (
-                  <Fact label="Employees" value={Number(facts.employees).toLocaleString()} />
-                ) : null}
-                {facts.founded ? <Fact label="Founded" value={String(facts.founded)} /> : null}
-                {facts.ticker && <Fact label="Ticker" value={facts.ticker} />}
-                {money(facts.marketCap) && <Fact label="Market cap" value={money(facts.marketCap)!} />}
-              </div>
             </div>
 
             {/* Score */}
@@ -307,6 +401,106 @@ export default function ReportDetailPage() {
                 </p>
               </div>
             ) : null}
+          </div>
+
+          {/* Fast Facts / Quick Links — the two columns of the cover. The facts
+              read as sentences rather than labelled cells: "Headquartered in
+              London, United Kingdom" is what a rep would say out loud. */}
+          <div className="mt-7 grid gap-x-12 gap-y-7 lg:grid-cols-[1.2fr_1fr]">
+            <div>
+              <h2 className="mb-3 text-lg font-bold tracking-tight text-ink">Fast Facts</h2>
+
+              {facts.description && (
+                <div className="max-w-2xl">
+                  {/* Clamped by line count rather than cut at a character
+                      count: the whole description stays in the DOM, so
+                      expanding is instant and printing gets all of it however
+                      it happened to be left on screen. */}
+                  <p
+                    ref={descriptionRef}
+                    className={cx(
+                      'text-sm leading-relaxed text-ink-soft print:line-clamp-none',
+                      !descriptionOpen && 'line-clamp-6'
+                    )}
+                  >
+                    {facts.description}
+                  </p>
+                  {(descriptionClamped || descriptionOpen) && (
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionOpen((open) => !open)}
+                      className="no-print mt-1.5 text-[13px] font-semibold text-brand-600 hover:text-brand-700"
+                    >
+                      {descriptionOpen ? 'Show less' : 'Show more'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <ul className="mt-4 space-y-2.5">
+                {headquarters && (
+                  <FactRow icon={MapPin} value={`Headquartered in ${headquarters}`} />
+                )}
+                {facts.industry && <FactRow icon={Factory} value={facts.industry} />}
+                {money(facts.revenue, facts.revenueCurrency) && (
+                  <FactRow
+                    icon={Banknote}
+                    value={`${money(facts.revenue, facts.revenueCurrency)} revenue${
+                      facts.revenueAsOf ? ` (FY${facts.revenueAsOf})` : ''
+                    }`}
+                  />
+                )}
+                {money(facts.marketCap) && (
+                  <FactRow icon={TrendingUp} value={`${money(facts.marketCap)} market cap`} />
+                )}
+                {facts.founded ? (
+                  <FactRow icon={CalendarDays} value={`Founded ${facts.founded}`} />
+                ) : null}
+              </ul>
+
+              {report.score?.summary && (
+                <p className="mt-4 max-w-2xl text-sm leading-relaxed text-ink-soft">
+                  {report.score.summary}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <h2 className="mb-3 text-lg font-bold tracking-tight text-ink">Quick Links</h2>
+
+              <ul className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
+                {facts.employees ? (
+                  <FactRow
+                    icon={Users}
+                    value={`${Number(facts.employees).toLocaleString()} employees`}
+                  />
+                ) : null}
+                {quickLinks.map((link: any) => (
+                  <FactRow
+                    key={link.url}
+                    icon={linkIcon(link)}
+                    value={linkLabel(link)}
+                    href={link.url}
+                  />
+                ))}
+              </ul>
+
+              <h2 className="mb-3 mt-6 text-lg font-bold tracking-tight text-ink">
+                Account Information
+              </h2>
+              <ul className="space-y-2.5">
+                {report.accountAddedAt && (
+                  <FactRow icon={CalendarClock} value={`Added ${day(report.accountAddedAt)}`} />
+                )}
+                {lastRefreshed && (
+                  <FactRow
+                    icon={RefreshCw}
+                    value={`Last refreshed ${day(lastRefreshed)} at ${clock(lastRefreshed)}`}
+                  />
+                )}
+                <FactRow icon={User} value={`Owner: ${report.author?.name || 'Salesmotion AI'}`} />
+              </ul>
+            </div>
           </div>
         </div>
 
@@ -361,29 +555,6 @@ export default function ReportDetailPage() {
                 </li>
               ))}
             </ul>
-
-            {report.quickLinks?.length ? (
-              <>
-                <h3 className="mb-2 mt-5 text-2xs font-bold uppercase tracking-[0.12em] text-ink-faint">
-                  Quick links
-                </h3>
-                <ul className="space-y-1.5">
-                  {report.quickLinks.map((link: any) => (
-                    <li key={link.url}>
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-600 hover:text-brand-700"
-                      >
-                        {link.label}
-                        <ExternalLink size={11} />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
           </div>
         </div>
       </Card>
@@ -641,14 +812,32 @@ function Chapter({ id, label, blurb }: { id: string; label: string; blurb?: stri
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+/** One line of the cover: a mark, then the fact itself or the link it points at. */
+function FactRow({
+  icon: Icon,
+  value,
+  href,
+}: {
+  icon: React.ElementType;
+  value: string;
+  href?: string;
+}) {
   return (
-    <span>
-      <span className="mr-1.5 text-2xs font-bold uppercase tracking-wider text-ink-faint">
-        {label}
-      </span>
-      <span className="font-medium text-ink-soft">{value}</span>
-    </span>
+    <li className="flex items-start gap-2.5 text-[13.5px] leading-snug">
+      <Icon size={15} className="mt-0.5 shrink-0 text-brand-600" />
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 break-words font-medium text-brand-600 underline-offset-2 hover:underline"
+        >
+          {value}
+        </a>
+      ) : (
+        <span className="min-w-0 break-words text-ink-soft">{value}</span>
+      )}
+    </li>
   );
 }
 

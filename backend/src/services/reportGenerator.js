@@ -34,6 +34,16 @@ const F = {
   italic: 'Helvetica-Oblique',
 };
 
+// Only the symbols WinAnsi - the encoding pdfkit's core fonts use - can render.
+// Anything else falls back to the ISO code, which is legible in every font.
+const CURRENCY_SYMBOLS = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  CNY: '¥',
+};
+
 class ReportGenerator {
   constructor() {
     this.reportsDir = path.join(__dirname, '../../reports');
@@ -227,14 +237,19 @@ class ReportGenerator {
     return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   }
 
-  money(value) {
+  // Amounts carry the currency they were reported in; only market cap, which
+  // arrives from Finnhub already converted, keeps the dollar default.
+  money(value, currency) {
     if (value === undefined || value === null || value === '') return null;
     const n = Number(value);
     if (Number.isNaN(n)) return null;
-    if (Math.abs(n) >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-    if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-    if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-    return `$${n.toLocaleString()}`;
+
+    const symbol = currency ? (CURRENCY_SYMBOLS[currency] || `${currency} `) : '$';
+
+    if (Math.abs(n) >= 1e12) return `${symbol}${(n / 1e12).toFixed(2)}T`;
+    if (Math.abs(n) >= 1e9) return `${symbol}${(n / 1e9).toFixed(2)}B`;
+    if (Math.abs(n) >= 1e6) return `${symbol}${(n / 1e6).toFixed(1)}M`;
+    return `${symbol}${n.toLocaleString()}`;
   }
 
   h1(doc, ctx, text) {
@@ -382,19 +397,24 @@ class ReportGenerator {
       y = doc.y + 12;
     }
 
-    const chips = [
-      facts.headquarters ? ['Headquarters', facts.headquarters] : null,
-      facts.industry ? ['Industry', facts.industry] : null,
-      facts.employees ? ['Employees', Number(facts.employees).toLocaleString()] : null,
-      facts.founded ? ['Founded', String(facts.founded)] : null,
+    // Read as sentences, the way the web cover does - "Headquartered in London,
+    // United Kingdom" rather than a HEADQUARTERS label above a value
+    const revenue = this.money(facts.revenue, facts.revenueCurrency);
+    const lines = [
+      facts.headquarters ? `Headquartered in ${facts.headquarters}` : null,
+      facts.industry,
+      revenue ? `${revenue} revenue${facts.revenueAsOf ? ` (FY${facts.revenueAsOf})` : ''}` : null,
+      facts.employees ? `${Number(facts.employees).toLocaleString()} employees` : null,
+      this.money(facts.marketCap) ? `${this.money(facts.marketCap)} market cap` : null,
+      facts.founded ? `Founded ${facts.founded}` : null,
     ].filter(Boolean);
 
-    chips.forEach(([label, value]) => {
-      doc.font(F.bold).fontSize(8).fillColor(C.muted)
-        .text(label.toUpperCase(), MARGIN, y, { width: leftWidth, characterSpacing: 0.5 });
+    lines.forEach(line => {
+      // Stands in for the icon the web cover carries; PDF core fonts have none
+      doc.circle(MARGIN + 2.5, y + 4.5, 2).fill(C.brand);
       doc.font(F.regular).fontSize(10).fillColor(C.ink)
-        .text(value, MARGIN, doc.y + 1, { width: leftWidth });
-      y = doc.y + 9;
+        .text(line, MARGIN + 11, y, { width: leftWidth - 11 });
+      y = doc.y + 5;
     });
 
     // --- Score narrative ---
@@ -410,24 +430,21 @@ class ReportGenerator {
     doc.font(F.bold).fontSize(14).fillColor(C.ink).text('Quick Links', rightX, ry, { width: rightWidth });
     ry = doc.y + 8;
 
-    const links = (report.quickLinks || []).slice(0, 6);
-    if (links.length === 0 && facts.website) links.push({ label: this.hostname(facts.website), url: facts.website });
+    // Reports written before the homepage was fetched hold it only in
+    // fastFacts, so it is merged in rather than missing from the cover
+    const links = [...(report.quickLinks || [])];
+    if (facts.website && !links.some(l => this.hostname(l.url) === this.hostname(facts.website))) {
+      links.unshift({ label: this.hostname(facts.website), url: facts.website });
+    }
 
-    links.forEach(link => {
+    links.slice(0, 6).forEach(link => {
       doc.font(F.regular).fontSize(10).fillColor(C.link)
         .text(link.label, rightX, ry, { width: rightWidth, link: link.url, underline: false });
       ry = doc.y + 5;
     });
 
-    if (facts.ticker || facts.marketCap) {
-      ry += 6;
-      const line = [
-        facts.ticker ? `Ticker ${facts.ticker}` : null,
-        this.money(facts.marketCap) ? `Market cap ${this.money(facts.marketCap)}` : null,
-      ].filter(Boolean).join('   ·   ');
-      doc.font(F.regular).fontSize(9.5).fillColor(C.body).text(line, rightX, ry, { width: rightWidth });
-      ry = doc.y + 6;
-    }
+    // Ticker and market cap are not repeated here - the Yahoo Finance link
+    // above carries the symbol, and the cap is one of the fast facts.
 
     // --- Right column: report context (the lens this report was written with) ---
     ry += 14;
@@ -440,6 +457,10 @@ class ReportGenerator {
       ['Vertical', context.vertical],
       ['Pitch focus', (context.keywords || []).join(', ')],
       ['Capabilities', (context.verticalCapabilities || []).slice(0, 4).join(', ')],
+      ['Account added', this.day(report.accountAddedAt || meta.company?.addedAt)],
+      // Regenerating writes a new report, so for this one the two are minutes
+      // apart; lastUpdatedAt is when the pipeline finished writing it
+      ['Last refreshed', this.moment(report.lastUpdatedAt || report.generatedAt)],
     ].filter(([, value]) => value);
 
     contextRows.forEach(([label, value]) => {
@@ -474,6 +495,23 @@ class ReportGenerator {
   hostname(url) {
     if (!url) return '';
     return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+
+  day(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  // A report can be regenerated more than once in a day, so "last refreshed"
+  // only means something with the time on it
+  moment(value) {
+    const date = this.day(value);
+    if (!date) return null;
+    const time = new Date(value)
+      .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `${date} at ${time}`;
   }
 
   truncate(text, max) {

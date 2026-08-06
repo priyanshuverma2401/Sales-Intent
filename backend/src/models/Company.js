@@ -22,6 +22,10 @@ const companySchema = new mongoose.Schema({
   financials: {
     marketCap: Number,
     revenue: Number,
+    // Revenue is not always reported in dollars, and the fiscal year it belongs
+    // to is part of the fact - "$X" alone is not quotable on a report cover
+    revenueCurrency: String,
+    revenueAsOf: Number,
     revenueGrowth: Number,
     earnings: Number,
     eps: Number,
@@ -67,6 +71,7 @@ const companySchema = new mongoose.Schema({
     yahooFinance: { lastFetched: Date, status: String },
     finnhub: { lastFetched: Date, status: String },
     wikipedia: { lastFetched: Date, status: String },
+    wikidata: { lastFetched: Date, status: String },
     crunchbase: { lastFetched: Date, status: String },
     // The refresh route writes this; without it, Mongoose silently dropped it
     news: { lastFetched: Date, status: String },

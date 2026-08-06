@@ -189,7 +189,29 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to view this report' });
     }
 
-    res.json(report);
+    // Looked up after the check rather than populated into it: canRead compares
+    // report.userId as an id, and a populated document would not match.
+    const [author, company] = await Promise.all([
+      report.userId
+        ? User.findById(report.userId).select('firstName lastName email')
+        : null,
+      // Only needed when the report predates accountAddedAt being stamped on it
+      report.accountAddedAt || !report.companyId
+        ? null
+        : Company.findById(report.companyId).select('addedAt'),
+    ]);
+
+    res.json({
+      ...report.toObject(),
+      accountAddedAt: report.accountAddedAt || company?.addedAt || null,
+      author: author
+        ? {
+            _id: author._id,
+            name: `${author.firstName || ''} ${author.lastName || ''}`.trim() || author.email,
+            email: author.email,
+          }
+        : null,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

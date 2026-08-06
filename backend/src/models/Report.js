@@ -58,6 +58,9 @@ const reportSchema = new mongoose.Schema({
     website: String,
     ticker: String,
     marketCap: Number,
+    revenue: Number,
+    revenueCurrency: String,
+    revenueAsOf: Number,
     fiscalYearStart: String,
     logoUrl: String,
   },
@@ -168,6 +171,10 @@ const reportSchema = new mongoose.Schema({
   aiModel: String,
   generatedAt: { type: Date, default: Date.now },
   lastUpdatedAt: Date,
+  // When the prospect was first added to the workspace, copied off the company
+  // at generation time. Distinct from generatedAt: regenerating writes a new
+  // report, but the account has been on the books since whenever it was added.
+  accountAddedAt: Date,
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -12,6 +12,7 @@ interface SearchResult {
   industry?: string;
   source?: string;
   snippet?: string;
+  website?: string;
 }
 
 /**
@@ -157,8 +158,14 @@ export default function AddAccountModal({
               </div>
               <div className="min-w-0">
                 <p className="truncate font-semibold text-ink">{selected.name}</p>
+                {/* Website first: it is the one line that confirms the right
+                    HDFC was picked before a report is generated against it */}
                 <p className="truncate text-xs text-ink-muted">
-                  {[selected.industry, selected.source === 'local' ? 'In your library' : 'Public data']
+                  {[
+                    selected.website,
+                    selected.industry,
+                    selected.source === 'local' ? 'In your library' : 'Public data',
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </p>
@@ -200,11 +207,11 @@ export default function AddAccountModal({
                     className="flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-2.5 text-left transition last:border-0 hover:bg-slate-50"
                   >
                     <Building2 size={15} className="mt-0.5 shrink-0 text-ink-faint" />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-ink">
-                        {result.name}
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-baseline gap-2 text-sm font-medium text-ink">
+                        <span className="truncate">{result.name}</span>
                         {result.ticker && (
-                          <span className="ml-2 font-mono text-2xs text-ink-faint">
+                          <span className="shrink-0 font-mono text-2xs text-ink-faint">
                             {result.ticker}
                           </span>
                         )}
@@ -212,6 +219,14 @@ export default function AddAccountModal({
                       {(result.snippet || result.industry) && (
                         <p className="truncate text-xs text-ink-muted">
                           {result.industry || result.snippet}
+                        </p>
+                      )}
+                      {/* The domain is what separates HDFC Bank from HDFC Life
+                          from HDFC ERGO - their descriptions all read the same,
+                          so it sits on its own line under the one it settles. */}
+                      {result.website && (
+                        <p className="mt-0.5 truncate text-xs font-semibold text-brand-600">
+                          {result.website}
                         </p>
                       )}
                     </div>

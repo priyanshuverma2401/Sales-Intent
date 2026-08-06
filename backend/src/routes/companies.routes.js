@@ -100,12 +100,15 @@ router.get('/search', authenticate, async (req, res) => {
         name: c.name,
         ticker: c.ticker,
         industry: c.industry,
+        // Shown as a domain so a saved account reads the same as a suggestion
+        website: companyDataFetcher.hostname(c.website),
         source: 'local',
       })),
       ...wikiResults.map(w => ({
         name: w.name,
         source: w.source,
         snippet: w.snippet,
+        website: w.website,
       })),
     ];
 
@@ -151,12 +154,22 @@ router.post('/', authenticate, async (req, res) => {
         employees: companyInfo.employees,
         foundedYear: companyInfo.foundedYear,
         logoUrl: companyInfo.logo,
+        city: companyInfo.city,
         country: companyInfo.country || 'Unknown',
-        financials: { ...financials, lastUpdated: new Date() },
+        financials: {
+          // Revenue comes from the firmographics lookup, not the market feeds,
+          // so it is merged in rather than read out of splitFinancialPayload
+          revenue: companyInfo.revenue,
+          revenueCurrency: companyInfo.revenueCurrency,
+          revenueAsOf: companyInfo.revenueAsOf,
+          ...financials,
+          lastUpdated: new Date(),
+        },
         stock: { ...stock, lastUpdated: new Date() },
         addedBy: req.user._id,
         dataSources: {
           wikipedia: { lastFetched: new Date(), status: 'success' },
+          wikidata: { lastFetched: new Date(), status: companyInfo.city ? 'success' : 'empty' },
           finnhub: { lastFetched: new Date(), status: ticker ? 'success' : 'skipped' },
         },
       });
@@ -290,11 +303,23 @@ router.post('/:id/refresh', authenticate, async (req, res) => {
     company.financials = { ...company.financials?.toObject?.() ?? company.financials, ...financials, lastUpdated: new Date() };
     company.stock = { ...company.stock?.toObject?.() ?? company.stock, ...stock, lastUpdated: new Date() };
 
+    // Headcount, headquarters and revenue, for accounts stored before those
+    // were ever fetched. Saves the document itself when it fills anything in.
+    // force: pressing Refresh is an explicit request to look again, so it skips
+    // the cooldown that keeps report generation from re-querying a known miss
+    await companyDataFetcher.backfill(company, { force: true }).catch(e =>
+      console.warn(`⚠️ Firmographics backfill skipped: ${e.message}`)
+    );
+
     // Backfill descriptive fields that were missing. Enrichment only ran when a
     // company was first added, so anything absent then stayed blank forever.
     if (!company.industry && financial.industry) company.industry = financial.industry;
     if (!company.website && financial.website) company.website = financial.website;
-    if (!company.logoUrl && financial.logo) company.logoUrl = financial.logo;
+    // Finnhub states a logo, so it also replaces an article lead image left
+    // behind when Wikidata had no logo of its own to offer
+    if (financial.logo && (!company.logoUrl || companyDataFetcher.isArticleImage(company.logoUrl))) {
+      company.logoUrl = financial.logo;
+    }
     if ((!company.country || company.country === 'Unknown') && financial.country) {
       company.country = financial.country;
     }

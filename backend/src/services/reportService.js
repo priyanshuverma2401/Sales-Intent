@@ -4,6 +4,7 @@ const intelligenceService = require('./intelligenceService');
 const reportGenerator = require('./reportGenerator');
 const aiEngine = require('./aiEngine');
 const crmService = require('./crm');
+const companyDataFetcher = require('./dataFetchers/companyDataFetcher');
 
 /**
  * Owns the "generate a report" use case so both the accounts route (auto-run on
@@ -28,15 +29,26 @@ class ReportService {
   }
 
   buildFastFacts(company, financial = {}) {
+    // 'Unknown' is the placeholder stored for a company added before its country
+    // could be resolved. Carried onto the cover it reads "Headquartered in
+    // Unknown", so it is dropped and the line simply does not appear.
+    const place = [company.city, company.state, company.country]
+      .filter(part => part && String(part).toLowerCase() !== 'unknown');
+
     return {
       description: company.description,
       industry: company.industry,
-      headquarters: [company.city, company.state, company.country].filter(Boolean).join(', ') || company.country,
+      headquarters: place.join(', ') || undefined,
       employees: company.employees,
       founded: company.foundedYear,
       website: company.website,
       ticker: company.ticker,
       marketCap: company.financials?.marketCap || company.stock?.marketCap || financial.marketCap,
+      revenue: company.financials?.revenue || financial.revenue,
+      // Reported currency, not assumed dollars - a London or Bengaluru account
+      // files in its own
+      revenueCurrency: company.financials?.revenueCurrency,
+      revenueAsOf: company.financials?.revenueAsOf,
       logoUrl: company.logoUrl,
     };
   }
@@ -124,6 +136,7 @@ class ReportService {
       status: 'pending',
       progress: { step: 'Queued', percent: 5 },
       generatedAt: new Date(),
+      accountAddedAt: company.addedAt,
       // Stamped up front, not on completion: the lens is known the moment the
       // report is requested, and the reports list filters on it. Writing it only
       // on success left every pending and failed report with no vertical.
@@ -165,6 +178,15 @@ class ReportService {
       report.progress = { step, percent };
       Report.updateOne({ _id: report._id }, { $set: { progress: { step, percent } } }).catch(() => {});
     };
+
+    // The cover is assembled straight off the company record, so anything the
+    // record is missing is simply absent from the report. Repair it first -
+    // accounts added before firmographics were fetched have no headcount,
+    // headquarters or revenue at all.
+    setProgress('Checking account details', 5);
+    await companyDataFetcher.backfill(company).catch(error => {
+      console.warn(`⚠️ Firmographics backfill skipped for ${company.name}: ${error.message}`);
+    });
 
     // The tenant's own CRM, when one is connected. contextFor never throws: a
     // CRM outage degrades the report to public evidence instead of failing it.

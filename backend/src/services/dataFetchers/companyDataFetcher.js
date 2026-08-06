@@ -1,5 +1,6 @@
 const axios = require('axios');
 const financialDataFetcher = require('./financialDataFetcher');
+const firmographicsFetcher = require('./firmographicsFetcher');
 
 // Wikipedia's API rejects requests without a descriptive User-Agent
 const WIKI_HEADERS = {
@@ -30,9 +31,11 @@ class CompanyDataFetcher {
       if (page.extract) {
         return {
           description: page.extract,
-          // Named `logo` so it lines up with what the caller stores as logoUrl;
-          // this used to be returned as `image` and was silently discarded.
-          logo: page.thumbnail?.source,
+          // The article's lead image, which is the logo for some companies and
+          // a photo of a campus or a founder for others - Infosys returns
+          // "Infosys_(4911287704).jpg", a picture of a building. Kept only as a
+          // last resort behind the sources that state a logo explicitly.
+          pageImage: page.thumbnail?.source,
           source: 'Wikipedia',
         };
       }
@@ -85,9 +88,12 @@ class CompanyDataFetcher {
       ticker,
     };
 
-    const [wikipediaData, crunchbaseData, fundamentals] = await Promise.all([
+    const [wikipediaData, crunchbaseData, firmographics, fundamentals] = await Promise.all([
       this.fetchFromWikipedia(companyName),
       this.fetchFromCrunchbase(companyName),
+      // Headcount, headquarters city and revenue come from nowhere else on a
+      // keyless install, and the report cover is built out of exactly those.
+      firmographicsFetcher.fetch(companyName, ticker),
       // Finnhub carries industry / website / logo / country, which Wikipedia's
       // extract does not. Without this the stored company had a blank industry.
       ticker ? financialDataFetcher.getCompanyFundamentals(ticker) : Promise.resolve(null),
@@ -96,16 +102,138 @@ class CompanyDataFetcher {
     if (wikipediaData) companyInfo = { ...companyInfo, ...wikipediaData };
     if (crunchbaseData) companyInfo = { ...companyInfo, ...crunchbaseData };
 
+    if (firmographics) {
+      // Wikidata is the only source for these, so it does not have to compete
+      for (const key of ['city', 'country', 'employees', 'revenue', 'revenueCurrency', 'revenueAsOf', 'foundedYear']) {
+        if (companyInfo[key] === undefined && firmographics[key] !== undefined && firmographics[key] !== null) {
+          companyInfo[key] = firmographics[key];
+        }
+      }
+      // Finnhub's industry ("Banking") reads better than Wikidata's item label
+      // ("economics of banking"), so this only fills a gap
+      if (!companyInfo.industry && firmographics.industry) companyInfo.industry = firmographics.industry;
+      if (!companyInfo.website && firmographics.website) companyInfo.website = firmographics.website;
+    }
+
     if (fundamentals) {
       // Only fill gaps - never clobber a richer Wikipedia/Crunchbase value
-      for (const key of ['industry', 'website', 'logo', 'country']) {
+      for (const key of ['industry', 'website', 'country']) {
         if (!companyInfo[key] && fundamentals[key]) companyInfo[key] = fundamentals[key];
       }
       if (!companyInfo.ticker) companyInfo.ticker = fundamentals.ticker;
     }
 
+    // Sources that state "this is the logo" come first. The article's lead image
+    // is a guess at one and is only better than showing nothing.
+    companyInfo.logo =
+      firmographics?.logoUrl || fundamentals?.logo || companyInfo.pageImage || undefined;
+    delete companyInfo.pageImage;
+
     console.log('✅ Company info fetched');
     return companyInfo;
+  }
+
+  /**
+   * Whether a stored logo is really the article's lead image.
+   *
+   * Wikipedia's pageimages endpoint serves from upload.wikimedia.org; a logo
+   * named by Wikidata comes through Special:FilePath on commons.wikimedia.org,
+   * and Finnhub's from its own host. So the host alone tells them apart.
+   */
+  isArticleImage(url) {
+    return /upload\.wikimedia\.org/i.test(String(url || ''));
+  }
+
+  /**
+   * Fill in firmographics an existing account is missing, in place.
+   *
+   * Enrichment used to run only at "Add account", so every company stored before
+   * this fetcher existed - which is all of them - has no headcount, no city and
+   * no revenue, and regenerating the report would have reproduced the same empty
+   * cover. Report generation calls this so a rerun repairs the record.
+   *
+   * @param {object} [options]
+   * @param {boolean} [options.force] look again even if a recent lookup found
+   *   nothing - what "Refresh" is for
+   * @returns {Promise<boolean>} whether anything was actually filled in
+   */
+  async backfill(company, { force = false } = {}) {
+    if (!company) return false;
+
+    const needsRevenue = !company.financials?.revenue;
+    const needsLogo = !company.logoUrl || this.isArticleImage(company.logoUrl);
+    const missing =
+      !company.city || needsRevenue || needsLogo || !company.employees || !company.industry ||
+      !company.foundedYear || !company.country || company.country === 'Unknown';
+
+    if (!missing) return false;
+
+    // Plenty of private accounts have no public record at all. Without this,
+    // every regenerated report would pay for the same three lookups and get the
+    // same nothing back.
+    const lastTried = company.dataSources?.wikidata?.lastFetched;
+    const daysSince = lastTried ? (Date.now() - new Date(lastTried)) / 86400000 : Infinity;
+    if (!force && daysSince < 7) return false;
+
+    const facts = await firmographicsFetcher.fetch(company.name, company.ticker);
+
+    // Record the attempt either way, so a miss is not retried on every report
+    if (!company.dataSources) company.dataSources = {};
+    company.dataSources.wikidata = {
+      lastFetched: new Date(),
+      status: facts ? 'success' : 'empty',
+    };
+
+    if (!facts) {
+      await company.save();
+      return false;
+    }
+
+    let changed = false;
+    const fill = (field, value) => {
+      if (value === undefined || value === null || value === '') return;
+      if (company[field]) return;
+      company[field] = value;
+      changed = true;
+    };
+
+    fill('city', facts.city);
+    fill('employees', facts.employees);
+    fill('foundedYear', facts.foundedYear);
+    fill('industry', facts.industry);
+    fill('website', facts.website);
+
+    if ((!company.country || company.country === 'Unknown') && facts.country) {
+      company.country = facts.country;
+      changed = true;
+    }
+
+    // The one field that is overwritten rather than merely filled: accounts
+    // added earlier stored the article's lead image, which for Infosys is a
+    // photograph of the campus. A logo Wikidata names as the logo replaces it.
+    if (needsLogo && facts.logoUrl) {
+      company.logoUrl = facts.logoUrl;
+      changed = true;
+    }
+
+    if (needsRevenue && facts.revenue) {
+      // Assigning into the subdocument keeps the rest of financials intact
+      company.financials = {
+        ...(company.financials?.toObject?.() ?? company.financials ?? {}),
+        revenue: facts.revenue,
+        revenueCurrency: facts.revenueCurrency,
+        revenueAsOf: facts.revenueAsOf,
+      };
+      changed = true;
+    }
+
+    if (changed) {
+      company.updatedAt = new Date();
+      console.log(`🧩 Backfilled firmographics for ${company.name}`);
+    }
+
+    await company.save();
+    return changed;
   }
 
   // Get company logo
@@ -131,40 +259,93 @@ class CompanyDataFetcher {
     return null;
   }
 
-  // Search companies using multiple sources
+  /**
+   * Name suggestions for the "Add an account" box, each with its homepage.
+   *
+   * A search for "hdfc" returns HDFC Bank, HDFC, HDFC Life and HDFC ERGO -
+   * four real and quite different companies whose one-line descriptions all
+   * read "an Indian financial services company". The domain is what actually
+   * tells them apart, so it is worth the second request to get it.
+   *
+   * Done with a search generator rather than list=search: the same call that
+   * finds the pages also returns each one's Wikidata id, which is what the
+   * homepages are then looked up against in a single batch.
+   */
   async searchCompanies(query) {
     console.log(`🔍 Searching for companies: ${query}`);
 
-    const results = [];
+    let results = [];
 
     try {
       const response = await axios.get('https://en.wikipedia.org/w/api.php', {
         params: {
           action: 'query',
-          list: 'search',
-          srsearch: query,
-          srnamespace: 0,
-          srlimit: 5,
+          generator: 'search',
+          gsrsearch: query,
+          gsrnamespace: 0,
+          gsrlimit: 5,
+          prop: 'extracts|pageprops',
+          ppprop: 'wikibase_item',
+          exintro: true,
+          explaintext: true,
+          exsentences: 1,
           format: 'json',
+          formatversion: 2,
         },
         headers: WIKI_HEADERS,
         timeout: 8000,
       });
 
-      response.data.query.search.forEach(result => {
-        results.push({
-          name: result.title,
+      results = (response.data.query?.pages || [])
+        // A generator returns pages in arbitrary order; index is the ranking
+        .sort((a, b) => (a.index || 0) - (b.index || 0))
+        .map(page => ({
+          name: page.title,
           source: 'Wikipedia',
-          // The API returns HTML search-match markup here
-          snippet: String(result.snippet || '').replace(/<[^>]+>/g, ''),
-        });
-      });
+          snippet: String(page.extract || '').replace(/\s+/g, ' ').trim(),
+          wikidataId: page.pageprops?.wikibase_item,
+        }));
+
+      await this.attachWebsites(results);
     } catch (error) {
       console.error('⚠️ Wikipedia search error:', error.message);
     }
 
     console.log(`✅ Found ${results.length} companies`);
     return results;
+  }
+
+  /**
+   * Fill in each suggestion's homepage from one batched Wikidata call.
+   *
+   * Mutates in place and swallows its own failures: a suggestion list without
+   * domains is still perfectly usable, and this must never be the reason the
+   * search box comes back empty.
+   */
+  async attachWebsites(results) {
+    const ids = results.map(r => r.wikidataId).filter(Boolean);
+    if (!ids.length) return;
+
+    try {
+      const entities = await firmographicsFetcher.entities(ids, 'claims');
+
+      for (const result of results) {
+        const claims = entities[result.wikidataId]?.claims;
+        const website = claims?.P856?.[0]?.mainsnak?.datavalue?.value;
+        // Shown as a domain, which is what a person recognises
+        if (website) result.website = this.hostname(website);
+      }
+    } catch (error) {
+      console.error('⚠️ Suggestion website lookup failed:', error.message);
+    }
+  }
+
+  hostname(url) {
+    return String(url || '')
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/$/, '')
+      .split('/')[0];
   }
 }
 
