@@ -86,7 +86,7 @@ class ReportService {
     if (!aiEngine.enabled) {
       return {
         status: 503,
-        error: 'AI generation is not configured. Set GROQ_API_KEY on the server to generate reports.',
+        error: 'AI generation is not configured. Set the AZURE_OPENAI_* credentials on the server to generate reports.',
         code: 'AI_DISABLED',
       };
     }

@@ -1,11 +1,14 @@
+const azure = require('./azure');
 const groq = require('./groq');
 const gemini = require('./gemini');
 const { ProviderError } = require('./errors');
 
-// Preference order. Groq first because it is the faster of the two; Gemini
-// carries the day once Groq's per-day token allowance is spent.
-// Override with PROVIDER_ORDER=gemini,groq to flip them.
-const REGISTRY = { groq, gemini };
+// Preference order. Azure first: it is the deployment we pay for, so it has no
+// free-tier day cap and the largest context window of the three. Groq is the
+// fast free stand-in when Azure is unreachable, and Gemini carries the day once
+// Groq's per-day token allowance is spent.
+// Override with PROVIDER_ORDER=groq,gemini to take Azure out of the chain.
+const REGISTRY = { azure, groq, gemini };
 
 const DEFAULT_COOLDOWN_MS = Number(process.env.PROVIDER_COOLDOWN_MS) || 60_000;
 const BAD_KEY_COOLDOWN_MS = 30 * 60_000;
@@ -14,7 +17,7 @@ const BAD_KEY_COOLDOWN_MS = 30 * 60_000;
 const cooldownUntil = new Map();
 
 function chain() {
-  const order = (process.env.PROVIDER_ORDER || 'groq,gemini')
+  const order = (process.env.PROVIDER_ORDER || 'azure,groq,gemini')
     .split(',')
     .map(n => n.trim().toLowerCase())
     .filter(Boolean);
@@ -50,7 +53,7 @@ async function complete({ system, prompt, maxTokens, json }) {
 
   if (!providers.length) {
     throw new Error(
-      'No AI provider is configured - set GROQ_API_KEY or GEMINI_API_KEY on the server'
+      'No AI provider is configured - set AZURE_OPENAI_* , GROQ_API_KEY or GEMINI_API_KEY on the server'
     );
   }
 

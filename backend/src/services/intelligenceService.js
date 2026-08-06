@@ -8,9 +8,11 @@ const jobDataFetcher = require('./dataFetchers/jobDataFetcher');
 // single biggest driver of prompt size. On Groq's free tier (12k tokens/min) a
 // full-length list made one request larger than the whole per-minute budget.
 //
-// These defaults are deliberately tight for development. Every one of them is
-// an env var: raise them in .env after upgrading the Groq plan, or when running
-// on Gemini whose context window is far larger. No code change is needed.
+// These defaults stay tight because they also govern the Groq fallback, whose
+// free tier cannot take a full list. Every one is an env var: raise them in
+// .env now that Azure serves the primary traffic with a 272k input window.
+// Measured supply for a large-cap prospect is ~33 relevant articles, 5 filings
+// with extracted text, and 0-800 open roles, so 30 / 10 / 5 is not aspirational.
 // Pre-limit values were 26 / 8 / 4, with SOURCE_BODY_CHARS at 320.
 const MAX_NEWS_SOURCES = Number(process.env.MAX_NEWS_SOURCES) || 8;
 const MAX_JOB_SOURCES = Number(process.env.MAX_JOB_SOURCES) || 3;
@@ -105,7 +107,10 @@ class IntelligenceService {
       company.ticker
         ? financialDataFetcher.fetchFinancialData(company.ticker).catch(() => ({}))
         : Promise.resolve({}),
-      jobDataFetcher.fetchJobData(company.name).catch(() => ({ openPositions: [] })),
+      // Keywords rank the roles, not filter them: a board can return 800
+      // postings and only a handful reach the prompt, so the ones that argue
+      // the seller's case have to sort to the top.
+      jobDataFetcher.fetchJobData(company.name, keywords).catch(() => ({ openPositions: [] })),
     ]);
 
     return {
@@ -141,9 +146,67 @@ class IntelligenceService {
    * Build the numbered source list the AI cites against.
    * Keyword-matched articles are ranked first so the model reaches for them.
    */
+  /**
+   * The company's own numbers, as one citable source.
+   *
+   * These 20-odd fields were already being fetched for the report header but
+   * never reached the model as evidence, so it could not say "revenue growth is
+   * 9% against a debt/equity of 0.6" and cite it. One compact source is enough:
+   * they are facts about a single moment, not separate documents.
+   */
+  financialSource(financial = {}, company = {}) {
+    const num = (value, suffix = '', digits = 2) =>
+      Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : null;
+
+    const money = value => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      if (Math.abs(n) >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+      if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+      if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+      return `$${n.toLocaleString()}`;
+    };
+
+    const parts = [
+      ['Market cap', money(financial.marketCap)],
+      ['Share price', money(financial.currentPrice)],
+      ['52-week range',
+        money(financial.fiftyTwoWeekLow) && money(financial.fiftyTwoWeekHigh)
+          ? `${money(financial.fiftyTwoWeekLow)}–${money(financial.fiftyTwoWeekHigh)}`
+          : null],
+      ['Revenue growth (TTM YoY)', num(financial.revenueGrowth, '%')],
+      ['P/E (TTM)', num(financial.peRatio)],
+      ['EPS (TTM)', num(financial.eps)],
+      ['Return on equity', num(financial.roe, '%')],
+      ['Debt/equity', num(financial.debtToEquity)],
+      ['Current ratio', num(financial.currentRatio)],
+      ['Industry', financial.industry],
+      ['Exchange', financial.exchange],
+      ['Country', financial.country],
+    ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+
+    // Price alone is not worth a source slot - it says nothing about how the
+    // business is doing, which is the only reason this is here.
+    if (parts.length < 3) return null;
+
+    return {
+      title: `Financial snapshot — ${company.ticker || company.name || 'company'}`,
+      description: parts.map(([label, value]) => `${label}: ${value}`).join('; '),
+      url: financial.website || undefined,
+      source: 'Finnhub / Yahoo Finance',
+      publishedAt: financial.timestamp ? new Date(financial.timestamp) : new Date(),
+      type: 'financial',
+    };
+  }
+
   buildSources({ news, jobs, financial }, company = {}) {
     const sources = [];
     let index = 1;
+
+    // First, so it is always [1]: the model reaches for low-numbered sources,
+    // and every other claim reads better anchored to the company's own figures.
+    const snapshot = this.financialSource(financial, company);
+    if (snapshot) sources.push({ ...snapshot, index: index++ });
 
     const relevant = news.filter(n => this.isRelevant(n, company));
     // If the filter is too aggressive for an obscure name, fall back to the raw
@@ -176,14 +239,17 @@ class IntelligenceService {
         });
       });
 
+    // Already ranked by the fetcher, keyword-matching roles first
     jobs.slice(0, MAX_JOB_SOURCES).forEach(job => {
       if (!job.title) return;
+      const label = `${job.title}${job.location ? ` — ${job.location}` : ''}`;
       sources.push({
         index: index++,
-        title: `Open role: ${job.title}${job.location ? ` — ${job.location}` : ''}`,
+        title: `Open role: ${label}${job.matchedKeyword ? `  [matches: ${job.matchedKeyword}]` : ''}`,
         description: job.description,
         url: job.url,
         source: job.source || 'Jobs',
+        publishedAt: job.postedAt ? new Date(job.postedAt) : undefined,
         type: 'job',
       });
     });
@@ -192,6 +258,9 @@ class IntelligenceService {
       sources.push({
         index: index++,
         title: `SEC filing ${filing.type || ''} ${filing.date || ''}`.trim(),
+        // Populated by financialDataFetcher.enrichFilings - without it a filing
+        // is a citable URL carrying no information
+        description: filing.description,
         url: filing.url,
         source: 'SEC EDGAR',
         publishedAt: filing.date ? new Date(filing.date) : undefined,

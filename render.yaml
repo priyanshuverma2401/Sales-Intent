@@ -57,6 +57,15 @@ services:
       - key: FRONTEND_URL
         sync: false
 
+      # Azure OpenAI - the primary provider. All three must be set in the Render
+      # dashboard or the chain silently falls through to Groq.
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        sync: false
+
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
@@ -74,7 +83,13 @@ services:
 
       # --- Tunables (same defaults as the code) ------------------------------
       - key: PROVIDER_ORDER
-        value: groq,gemini
+        value: azure,groq,gemini
+      - key: AZURE_OPENAI_API_VERSION
+        value: 2024-10-21
+      # Optional: the underlying model behind the deployment, e.g. gpt-5.
+      # Labels the report and picks the parameter style.
+      - key: AZURE_OPENAI_MODEL
+        sync: false
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
       - key: GEMINI_MODEL

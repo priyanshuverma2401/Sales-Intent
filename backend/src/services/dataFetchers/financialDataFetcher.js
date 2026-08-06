@@ -1,10 +1,26 @@
 const axios = require('axios');
+const { convert } = require('html-to-text');
 
 // SEC requires a descriptive User-Agent with contact details on every request
 const SEC_HEADERS = {
   'User-Agent': process.env.SEC_USER_AGENT || 'SalesMotion/1.0 (support@salesmotion.local)',
   'Accept-Encoding': 'gzip, deflate',
 };
+
+// How many of the most recent filings get their text pulled down, and how much
+// of each is kept. A 10-K runs to several megabytes, so only the leading prose
+// is taken - by then the filing has said what it was filed to say.
+// Read explicitly rather than with `|| default` so SEC_ENRICH_FILINGS=0 means
+// "skip the fetch" instead of silently falling back to 5.
+function envInt(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+const ENRICH_FILINGS = envInt('SEC_ENRICH_FILINGS', 5);
+const FILING_EXCERPT_CHARS = envInt('SEC_EXCERPT_CHARS', 3000);
 
 class FinancialDataFetcher {
   constructor() {
@@ -171,12 +187,85 @@ class FinancialDataFetcher {
         });
       }
 
-      return filings;
+      return this.enrichFilings(filings);
     } catch (error) {
       console.error('❌ SEC EDGAR error:', error.message);
     }
 
     return [];
+  }
+
+  /**
+   * Pull the actual text of the most recent filings.
+   *
+   * Without this a filing reaches the model as "SEC filing 8-K 2025-01-15" and
+   * a URL - citable, but carrying no information. What a company told the SEC
+   * about its own risks and spending is the highest-quality evidence in the
+   * report, and it was being thrown away.
+   *
+   * Only the newest few are fetched: the documents are large, and a 10-K from
+   * three years ago says nothing about this quarter's buying intent.
+   */
+  async enrichFilings(filings) {
+    if (ENRICH_FILINGS < 1) return filings;
+
+    const enriched = await Promise.all(
+      filings.slice(0, ENRICH_FILINGS).map(async filing => {
+        try {
+          const response = await axios.get(filing.url, {
+            headers: SEC_HEADERS,
+            timeout: 12000,
+            maxContentLength: 25 * 1024 * 1024,
+            responseType: 'text',
+            transformResponse: [data => data],
+          });
+
+          const description = this.extractFilingText(String(response.data || ''));
+          return description ? { ...filing, description } : filing;
+        } catch (error) {
+          // One unreachable document must not cost the report its filings
+          return filing;
+        }
+      })
+    );
+
+    const withText = enriched.filter(f => f.description).length;
+    console.log(`📄 Extracted text from ${withText}/${enriched.length} SEC filings`);
+
+    return [...enriched, ...filings.slice(ENRICH_FILINGS)];
+  }
+
+  /**
+   * Turn filing HTML into the prose worth citing.
+   *
+   * Everything before the first numbered "Item" is cover page - addresses,
+   * checkbox declarations, the registrant's phone number - so the excerpt
+   * starts there when one can be found. Tables of XBRL figures survive
+   * conversion as walls of digits and are stripped, since the numbers already
+   * arrive cleanly from Finnhub.
+   */
+  extractFilingText(html) {
+    if (!html) return '';
+
+    let text = convert(html, {
+      wordwrap: false,
+      selectors: [
+        { selector: 'a', options: { ignoreHref: true } },
+        { selector: 'img', format: 'skip' },
+        { selector: 'table', format: 'skip' },
+      ],
+    });
+
+    const item = text.search(/\bItem\s+\d+(\.\d+)?[.\s—-]/i);
+    if (item > 0) text = text.slice(item);
+
+    text = text
+      .replace(/\s+/g, ' ')
+      // Runs of bare figures left behind by stripped tables
+      .replace(/(?:\b[\d,.()$%-]+\b\s*){6,}/g, ' ')
+      .trim();
+
+    return text.length < 200 ? '' : text.slice(0, FILING_EXCERPT_CHARS);
   }
 
   // Main financial data fetch

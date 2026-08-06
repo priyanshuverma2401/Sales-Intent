@@ -162,7 +162,9 @@ const reportSchema = new mongoose.Schema({
   },
   error: String,
 
-  generatedBy: { type: String, default: 'groq' },
+  // Nothing assigns this - the provider that actually served the report is
+  // recorded on aiModel as "provider/model". Kept for older documents.
+  generatedBy: { type: String, default: 'ai' },
   aiModel: String,
   generatedAt: { type: Date, default: Date.now },
   lastUpdatedAt: Date,

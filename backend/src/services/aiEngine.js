@@ -23,9 +23,13 @@ class AIEngine {
     return providers.available().length > 0;
   }
 
-  // The model that actually served the last completion, for Report.aiModel
+  // The model that actually served the last completion, for Report.aiModel.
+  // Before the first call there is nothing to report, so name the provider that
+  // would take it rather than hard-coding one of the three.
   get lastModel() {
-    return this._lastModel || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    if (this._lastModel) return this._lastModel;
+    const next = providers.available()[0];
+    return next ? `${next.name}/${next.model}` : 'unconfigured';
   }
 
   // ---- transport ---------------------------------------------------------
@@ -33,7 +37,7 @@ class AIEngine {
   async complete(prompt, { maxTokens = 2048, json = false, system } = {}) {
     if (!this.enabled) {
       throw new Error(
-        'No AI provider is configured - set GROQ_API_KEY or GEMINI_API_KEY - reports cannot be generated'
+        'No AI provider is configured - set the AZURE_OPENAI_* keys (or GROQ_API_KEY / GEMINI_API_KEY) - reports cannot be generated'
       );
     }
 
@@ -87,7 +91,7 @@ class AIEngine {
 
     if (status === 401 || status === 403) {
       return new Error(
-        'The AI provider rejected the API key. Check GROQ_API_KEY and GEMINI_API_KEY on the server.'
+        'The AI provider rejected the API key. Check AZURE_OPENAI_API_KEY, GROQ_API_KEY and GEMINI_API_KEY on the server.'
       );
     }
 
