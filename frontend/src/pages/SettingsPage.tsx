@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Building2, Plug, Save, Sparkles, Users } from 'lucide-react';
+import { Building2, Code2, Plug, Save, Sparkles, Users } from 'lucide-react';
 import { apiError, authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { Alert, Button, Card, Field, PageHeader, TagInput, cx } from '../components/ui';
+import ApiKeysPanel from '../components/ApiKeysPanel';
 import CompanyProfilePanel from '../components/CompanyProfilePanel';
 import IntegrationsPanel from '../components/IntegrationsPanel';
 import UsersPanel from '../components/UsersPanel';
@@ -14,7 +15,7 @@ import {
   capabilitySuggestionsFor,
 } from '../lib/taxonomy';
 
-type TabId = 'focus' | 'company' | 'users' | 'integrations';
+type TabId = 'focus' | 'company' | 'users' | 'integrations' | 'api';
 
 export default function SettingsPage() {
   const { user, organization, setUser, setOrganization } = useAuthStore();
@@ -23,12 +24,20 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<TabId>('focus');
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
+  // The API tab is admin-only: a key reads every report the company has ever
+  // generated, so it is not something a member should see or create.
   const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
     { id: 'focus', label: 'Your focus', icon: Sparkles },
     { id: 'company', label: 'Company profile', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
-    // Admin-only: a CRM connection exposes the whole tenant's pipeline
-    ...(isAdmin ? [{ id: 'integrations' as TabId, label: 'Integrations', icon: Plug }] : []),
+    // Admin-only: a CRM connection exposes the whole tenant's pipeline, and an
+    // API key reads every report the company has ever generated
+    ...(isAdmin
+      ? [
+          { id: 'integrations' as TabId, label: 'Integrations', icon: Plug },
+          { id: 'api' as TabId, label: 'API', icon: Code2 },
+        ]
+      : []),
   ];
 
   return (
@@ -95,6 +104,8 @@ export default function SettingsPage() {
       {tab === 'integrations' && isAdmin && (
         <IntegrationsPanel canEdit={isAdmin} onMessage={setMessage} />
       )}
+
+      {tab === 'api' && isAdmin && <ApiKeysPanel canEdit={isAdmin} onMessage={setMessage} />}
     </div>
   );
 }
