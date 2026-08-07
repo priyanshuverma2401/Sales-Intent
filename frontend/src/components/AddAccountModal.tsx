@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Loader2, Search, Sparkles } from 'lucide-react';
+import { Building2, Loader2, Search } from 'lucide-react';
 import { apiError, companiesAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { Alert, Button, Field, Modal, TagInput, cx } from '../components/ui';
-import { KEYWORD_SUGGESTIONS } from '../lib/taxonomy';
+import { Alert, Button, Field, Modal } from '../components/ui';
 
 interface SearchResult {
   _id?: string;
@@ -16,9 +15,9 @@ interface SearchResult {
 }
 
 /**
- * Adding an account is the moment the pitch lens is chosen. The keyword field
- * defaults to the rep's profile keywords but can be overridden per account, so
- * one rep can chase Copilot at Microsoft and cost-takeout at HSBC.
+ * Adding an account asks for one thing: the company. The pitch lens comes from
+ * the rep's profile keywords, and the ticker is taken from the search hit when
+ * there is one — neither is worth a field here.
  */
 export default function AddAccountModal({
   open,
@@ -37,11 +36,6 @@ export default function AddAccountModal({
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<SearchResult | null>(null);
 
-  const [ticker, setTicker] = useState('');
-  const [keywords, setKeywords] = useState<string[]>(profileKeywords);
-  const [notes, setNotes] = useState('');
-  const [generateReport, setGenerateReport] = useState(true);
-
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -51,12 +45,7 @@ export default function AddAccountModal({
     setQuery('');
     setResults([]);
     setSelected(null);
-    setTicker('');
-    setKeywords(profileKeywords);
-    setNotes('');
-    setGenerateReport(true);
     setError('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Debounced search so a fast typist does not fire a request per keystroke
@@ -91,7 +80,6 @@ export default function AddAccountModal({
 
   const choose = (result: SearchResult) => {
     setSelected(result);
-    setTicker(result.ticker || '');
     setResults([]);
   };
 
@@ -105,10 +93,9 @@ export default function AddAccountModal({
     try {
       const res = await companiesAPI.addCompany({
         name,
-        ticker: ticker.trim() || undefined,
-        keywords,
-        notes: notes.trim() || undefined,
-        generateReport,
+        ticker: selected?.ticker || undefined,
+        keywords: profileKeywords,
+        generateReport: true,
       });
 
       onAdded({
@@ -124,24 +111,20 @@ export default function AddAccountModal({
     }
   };
 
-  const usingProfileDefaults =
-    keywords.length === profileKeywords.length &&
-    keywords.every((k, i) => k === profileKeywords[i]);
-
   return (
     <Modal
       open={open}
       onClose={onClose}
       size="lg"
       title="Add an account"
-      description="Search for the company, then confirm what you are pitching into it."
+      description="Search for the company you want to add."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={submit} loading={submitting} disabled={!selected && query.trim().length < 2}>
-            {generateReport ? 'Add & generate report' : 'Add account'}
+            Add &amp; generate report
           </Button>
         </>
       }
@@ -236,76 +219,6 @@ export default function AddAccountModal({
             )}
           </Field>
         )}
-
-        {/* ---- Ticker ---- */}
-        <Field label="Ticker" hint="Optional. Unlocks financial data and SEC filings in the report.">
-          <input
-            className="input font-mono uppercase"
-            placeholder="MSFT"
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value.toUpperCase())}
-          />
-        </Field>
-
-        {/* ---- The lens ---- */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Sparkles size={15} className="text-brand-600" />
-            <h3 className="text-sm font-bold text-ink">What are you pitching here?</h3>
-          </div>
-          <p className="mb-3 text-[13px] leading-relaxed text-ink-muted">
-            The report is written to answer{' '}
-            <span className="font-medium text-ink-soft">
-              “where does {selected?.name || 'this company'} need{' '}
-              {keywords.length ? keywords.join(' and ') : 'what I sell'}?”
-            </span>
-          </p>
-
-          <TagInput
-            value={keywords}
-            onChange={setKeywords}
-            placeholder="e.g. GenAI solutions, Copilot solutions"
-            suggestions={[...profileKeywords, ...KEYWORD_SUGGESTIONS]}
-          />
-
-          <p className="mt-2 text-xs text-ink-muted">
-            {usingProfileDefaults && keywords.length > 0
-              ? 'Using your profile defaults. Edit above to focus this account differently.'
-              : keywords.length === 0
-              ? 'No keywords — the report will fall back to your vertical capabilities.'
-              : 'Custom focus for this account only. Your profile stays unchanged.'}
-          </p>
-        </div>
-
-        <Field label="Notes" hint="Context only you see — deal stage, contacts, history.">
-          <textarea
-            className="input"
-            rows={2}
-            placeholder="Intro via Priya in Sept. Renewal cycle starts Q1."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </Field>
-
-        <label
-          className={cx(
-            'flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition',
-            generateReport ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-surface'
-          )}
-        >
-          <input
-            type="checkbox"
-            checked={generateReport}
-            onChange={(e) => setGenerateReport(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-          />
-          <span className="text-[13px]">
-            <span className="block font-semibold text-ink">Generate the report now</span>
-            <span className="block text-ink-muted">
-              Takes about a minute. We’ll notify you in your inbox when it’s ready.
-            </span>
-          </span>
-        </label>
       </div>
     </Modal>
   );
