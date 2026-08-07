@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -18,24 +18,22 @@ import { Alert, Button, Field } from '../components/ui';
 
 /**
  * The only public entry point into the product. There is no self-serve signup:
- * the address decides everything, and it is checked as it is typed rather than
- * after a password attempt - nobody should type a password only to be told they
- * have no account.
+ * the address decides everything, and it is checked when the user submits it
+ * rather than after a password attempt - nobody should type a password only to
+ * be told they have no account.
  *
  *   account exists                 -> ask for the password
  *   company subscribes, no account -> "ask your admin" (stage: 'contact-admin')
  *   company unknown                -> collect a phone number, book a demo
+ *
+ * The lookup only ever runs from Continue: the address is the user's to finish,
+ * and a screen that changes under them mid-typo is worse than one extra click.
  */
 type Stage = 'email' | 'password' | 'contact-admin' | 'demo' | 'demo-sent';
 
-// Deliberately requires a dot and a plausible TLD: this is what gates the
-// lookup, and firing it on "you@comp" would just spend a request on an address
-// the user is still halfway through typing.
+// Requires a dot and a plausible TLD so an obviously incomplete address is
+// rejected here instead of spending a request on it.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
-
-// Long enough that a steady typist finishes the domain first, short enough that
-// it still feels like it reacts to the dot.
-const CHECK_DEBOUNCE_MS = 550;
 
 const DEMO_PANEL = {
   heading: 'See what SalesMotion writes about the accounts you are chasing.',
@@ -61,18 +59,12 @@ export default function LoginPage() {
   const [companyName, setCompanyName] = useState('');
   const [domain, setDomain] = useState('');
 
-  // Typing races the network: only the newest lookup may change the stage, or a
-  // slow reply for a half-typed address would overwrite the right answer.
+  // Repeat clicks race each other: only the newest lookup may change the stage,
+  // or a slow reply for the previous address would overwrite the right answer.
   const checkSeq = useRef(0);
-
-  // The address the last lookup was for. Without it, "Change" would drop the
-  // user back on the email box with a still-valid address and the debounce
-  // would throw them straight back where they came from.
-  const checkedEmail = useRef('');
 
   const runCheck = useCallback(async (email: string) => {
     const seq = ++checkSeq.current;
-    checkedEmail.current = email;
     setChecking(true);
     setError('');
 
@@ -94,34 +86,17 @@ export default function LoginPage() {
     }
   }, []);
 
-  // Auto-triage as the address is typed. Runs only on the email stage, so
-  // going back to edit re-checks, but a reply in flight cannot yank someone off
-  // the password box.
-  useEffect(() => {
-    if (stage !== 'email') return;
-
-    const email = form.email.trim();
-    if (!EMAIL_RE.test(email) || email === checkedEmail.current) {
-      checkSeq.current++; // discard anything still in flight for an older value
-      setChecking(false);
-      return;
-    }
-
-    setChecking(true); // the spinner covers the wait as well as the request
-    const timer = setTimeout(() => runCheck(email), CHECK_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [form.email, stage, runCheck]);
-
   // Already signed in - don't show the login form again
   if (token && user) return <Navigate to="/" replace />;
 
   const backToEmail = () => {
     setStage('email');
     setError('');
+    setChecking(false);
+    checkSeq.current++; // a reply still in flight must not move the stage again
     setForm({ ...form, password: '' });
   };
 
-  // Continue: don't sit through the debounce when the user has clearly finished
   const submitEmail = (e: React.FormEvent) => {
     e.preventDefault();
     const email = form.email.trim();
