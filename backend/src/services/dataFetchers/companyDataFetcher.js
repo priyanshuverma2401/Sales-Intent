@@ -7,6 +7,53 @@ const WIKI_HEADERS = {
   'User-Agent': 'SalesMotion/1.0 (sales intelligence platform)',
 };
 
+/**
+ * What an article has to have on Wikidata before it can be an account.
+ *
+ * Wikipedia's full-text search ranks by article relevance, not by whether the
+ * thing is a company: "infosys" returns Nandan Nilekani and the Infosys Prize,
+ * "zoho" returns the Zoho disambiguation page and Zoho Office Suite. None of
+ * those are something a rep can pitch into.
+ *
+ * Rather than guess from the title or the description prose, a suggestion is
+ * kept when Wikidata records something only an organisation has. Listing the
+ * properties an organisation carries generalises better than trying to
+ * enumerate the classes one can be an instance of - there are hundreds of those
+ * (business, public company, bank, retail chain, university...) and the list is
+ * never finished.
+ */
+const ORGANISATION_CLAIMS = [
+  'P159',  // headquarters location
+  'P452',  // industry
+  'P1128', // employees
+  'P2139', // revenue
+  'P414',  // stock exchange
+  'P249',  // ticker symbol
+  'P1454', // legal form
+  'P169',  // chief executive officer
+  'P355',  // has subsidiary
+  'P740',  // location of formation
+];
+
+/**
+ * Classes that disqualify an article outright, even when it does carry one of
+ * the claims above. A founder inherits their company's industry often enough
+ * that the properties alone would let a person through.
+ */
+const NEVER_AN_ACCOUNT = new Set([
+  'Q5',        // human
+  'Q4167410',  // disambiguation page
+  'Q4167836',  // category
+  'Q13406463', // list article
+  'Q101352',   // family name
+  'Q202444',   // given name
+  'Q618779',   // award
+  'Q7397',     // software
+  'Q11424',    // film
+  'Q7889',     // video game
+  'Q571',      // book
+]);
+
 class CompanyDataFetcher {
   // Fetch from Wikipedia API
   async fetchFromWikipedia(companyName) {
@@ -269,7 +316,12 @@ class CompanyDataFetcher {
    *
    * Done with a search generator rather than list=search: the same call that
    * finds the pages also returns each one's Wikidata id, which is what the
-   * homepages are then looked up against in a single batch.
+   * homepages are then looked up against in a single batch. That same batch
+   * says whether the article is an organisation at all, so the people, awards
+   * and products the search ranks alongside the company get dropped.
+   *
+   * Twice as many candidates are asked for as are shown, because filtering
+   * throws some away - "infosys" loses two of its first five.
    */
   async searchCompanies(query) {
     console.log(`🔍 Searching for companies: ${query}`);
@@ -283,7 +335,7 @@ class CompanyDataFetcher {
           generator: 'search',
           gsrsearch: query,
           gsrnamespace: 0,
-          gsrlimit: 5,
+          gsrlimit: 12,
           prop: 'extracts|pageprops',
           ppprop: 'wikibase_item',
           exintro: true,
@@ -306,7 +358,7 @@ class CompanyDataFetcher {
           wikidataId: page.pageprops?.wikibase_item,
         }));
 
-      await this.attachWebsites(results);
+      results = (await this.describeFromWikidata(results)).slice(0, 6);
     } catch (error) {
       console.error('⚠️ Wikipedia search error:', error.message);
     }
@@ -316,28 +368,48 @@ class CompanyDataFetcher {
   }
 
   /**
-   * Fill in each suggestion's homepage from one batched Wikidata call.
+   * Attach each suggestion's homepage and drop the ones that are not companies,
+   * from one batched Wikidata call.
    *
-   * Mutates in place and swallows its own failures: a suggestion list without
-   * domains is still perfectly usable, and this must never be the reason the
-   * search box comes back empty.
+   * Swallows its own failures and returns the list untouched: an unfiltered
+   * suggestion list is worse but still usable, and a Wikidata outage must never
+   * be the reason the search box comes back empty.
    */
-  async attachWebsites(results) {
+  async describeFromWikidata(results) {
     const ids = results.map(r => r.wikidataId).filter(Boolean);
-    if (!ids.length) return;
+    if (!ids.length) return results;
 
+    let entities;
     try {
-      const entities = await firmographicsFetcher.entities(ids, 'claims');
-
-      for (const result of results) {
-        const claims = entities[result.wikidataId]?.claims;
-        const website = claims?.P856?.[0]?.mainsnak?.datavalue?.value;
-        // Shown as a domain, which is what a person recognises
-        if (website) result.website = this.hostname(website);
-      }
+      entities = await firmographicsFetcher.entities(ids, 'claims');
     } catch (error) {
-      console.error('⚠️ Suggestion website lookup failed:', error.message);
+      console.error('⚠️ Suggestion lookup failed:', error.message);
+      return results;
     }
+
+    return results.filter(result => {
+      const claims = entities[result.wikidataId]?.claims;
+      // An article Wikidata has nothing on is kept rather than guessed at -
+      // a small private prospect is likelier than a false positive
+      if (!claims) return true;
+
+      const website = claims.P856?.[0]?.mainsnak?.datavalue?.value;
+      // Shown as a domain, which is what a person recognises
+      if (website) result.website = this.hostname(website);
+
+      return this.isOrganisation(claims);
+    });
+  }
+
+  /** Whether a Wikidata item's claims describe an organisation. */
+  isOrganisation(claims) {
+    const instanceOf = (claims.P31 || [])
+      .map(claim => claim.mainsnak?.datavalue?.value?.id)
+      .filter(Boolean);
+
+    if (instanceOf.some(id => NEVER_AN_ACCOUNT.has(id))) return false;
+
+    return ORGANISATION_CLAIMS.some(property => claims[property]?.length);
   }
 
   hostname(url) {
