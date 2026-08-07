@@ -48,6 +48,41 @@ class IntelligenceService {
   }
 
   /**
+   * Talking points carry more than a claim: the spoken body, the question to
+   * ask, the proof to drop and the objection to expect. Older reports - and a
+   * model that ignores the contract - hold a plain {text} insight instead, so
+   * everything but the body is optional and both shapes render.
+   */
+  toTalkingPoints(value, limit = 5) {
+    if (!value) return [];
+
+    const clean = v => (v === undefined || v === null ? '' : String(v).replace(/\s+/g, ' ').trim());
+    const list = Array.isArray(value) ? value : [value];
+
+    return list
+      .map(item => {
+        if (typeof item === 'string') return { text: item.trim(), citations: [] };
+        if (!item || typeof item !== 'object') return null;
+
+        const text = clean(item.text || item.point || item.talkingPoint || item.body || item.insight);
+        const headline = clean(item.headline || item.title || item.label);
+        if (!text && !headline) return null;
+
+        return {
+          // A headline that is just the body repeated adds nothing above it
+          headline: headline && headline !== text ? headline : '',
+          text: text || headline,
+          question: clean(item.question || item.ask || item.discoveryQuestion),
+          proof: clean(item.proof || item.proofPoint || item.evidence),
+          objection: clean(item.objection || item.pushback || item.objectionHandling),
+          citations: this.toCitations(item.citations),
+        };
+      })
+      .filter(item => item && item.text.length > 2)
+      .slice(0, limit);
+  }
+
+  /**
    * The quote section is the one place the model is told to return nothing when
    * it finds nothing - and the one place it reliably ignores that, emitting
    * "No verbatim quotes are available" as if it were a quote. Those, and any
@@ -415,7 +450,7 @@ class IntelligenceService {
         opportunities: this.toInsights(brief.opportunities, 6),
         challenges: this.toInsights(brief.challenges, 5),
         peopleUpdates: this.toInsights(brief.peopleUpdates, 4),
-        talkingPoints: this.toInsights(brief.talkingPoints, 5),
+        talkingPoints: this.toTalkingPoints(brief.talkingPoints, 6),
         topNews: topNews.length ? topNews : fallbackNews,
         executivePerspective,
       },

@@ -313,9 +313,39 @@ ${this.crmBlock(crm, prospect.name)}
     return `
 Every array element that carries a claim is an object: {"text": "...", "citations": [1, 4]}
 - "citations" holds SOURCE numbers from the SOURCES list. Use [] only when the claim comes from the company profile.
-- Each "text" is 25-45 words: state the fact, then what it MEANS for the reader. Name figures, products, regions, executives and dates.
+- Each "text" is 55-85 words and runs to three or four complete sentences, in this order:
+    1. the fact, with the figures, products, regions, executives and dates that make it specific;
+    2. the scale or context that says how big a deal it is for a company this size;
+    3. what it MEANS for the reader - the operational or commercial consequence;
+    4. the opening it creates for the seller, or the risk if it is ignored.
+- Write it so a rep who reads it once can retell it from memory. Never leave a sentence fragment,
+  a bare headline or a one-line summary - a thin bullet is a failed bullet.
 - Never copy a headline as-is. "Company X launches Y" is not an insight; "Company X launched Y across three markets, which means Z is now an operational problem they must staff for" is.
-- No filler, no hedging, no "as an AI", no restating the instructions.`;
+- No filler, no hedging, no "as an AI", no restating the instructions. Detail means more specifics, not more adjectives.`;
+  }
+
+  /**
+   * Talking points are the one section a rep reads WHILE talking, so they are
+   * not bullets - each is a small script: the fact to open with, the meaning,
+   * the bridge to what we sell, the question to ask, the proof to drop and the
+   * pushback to expect. Long on purpose: it has to be recallable mid-sentence.
+   */
+  get talkingPointRule() {
+    return `
+TALKING POINT CONTRACT (this section is not a bullet list - do not compress it):
+Each talking point is an object with exactly these keys:
+{
+  "headline":  "6-10 words the rep can find at a glance, e.g. 'FY26 core-banking migration deadline'",
+  "text":      "120-170 words, written to be spoken out loud. Sentences 1-2: the specific fact - name the programme, executive, figure, region and date drawn from the SOURCES. Sentences 3-4: why it matters to THIS prospect's numbers, timeline or risk. Sentences 5-6: the bridge to the seller's named capability and the outcome it produces.",
+  "question":  "the exact open question to ask out loud, 15-30 words, impossible to answer with yes or no",
+  "proof":     "30-50 words: the seller proof point, customer story or metric to drop if the prospect leans in - only from the seller profile above, never invented",
+  "objection": "30-50 words: the most likely pushback in the prospect's own words, then the one-sentence answer to it",
+  "citations": [1, 4]
+}
+Rules:
+- Enough detail that the rep can recall the whole point from a glance mid-meeting. Never a single sentence.
+- Do not restate a Key Insight verbatim - a talking point is the spoken version with the ask attached.
+- Each one opens a different door: no two may lead to the same question.`;
   }
 
   // ---- report sections ---------------------------------------------------
@@ -332,16 +362,17 @@ Produce the "What You Need To Know" brief. Return JSON with exactly these keys:
 
 {
   "keyInsights":     [7 items],   // the most important, decision-relevant developments, each tied to the pitch focus
-  "opportunities":   [5 items],   // specific engagements the SELLER can pitch, naming the seller capability used
-  "challenges":      [4 items],   // problems/risks the prospect faces that the seller's capabilities address
+  "opportunities":   [5 items],   // specific engagements the SELLER can pitch, naming the seller capability used and the outcome it buys
+  "challenges":      [4 items],   // problems/risks the prospect faces that the seller's capabilities address, with the cost of leaving them unsolved
   "peopleUpdates":   [3 items],   // leadership moves, hiring patterns and what they signal about budget/ownership
-  "talkingPoints":   [4 items],   // first-call openers: reference a real fact, then the ask. Written to be said aloud.
-  "topNews":         [4 objects], // {"title","summary","source","url","publishedAt","citations":[n]} - real headlines from SOURCES only
+  "talkingPoints":   [5 objects], // see the TALKING POINT CONTRACT below - the longest section in the report
+  "topNews":         [4 objects], // {"title","summary","source","url","publishedAt","citations":[n]} - real headlines from SOURCES only, "summary" 40-60 words
   "executivePerspective": [3 objects] // {"quote","person","title","source","citations":[n]} - verbatim quotes found in SOURCES. If none exist, return []. NEVER fabricate a quote.
 }
-${this.citationRule}`;
+${this.citationRule}
+${this.talkingPointRule}`;
 
-    return this.completeJSON(prompt, { maxTokens: 4000, label: 'executive brief' });
+    return this.completeJSON(prompt, { maxTokens: 8000, label: 'executive brief' });
   }
 
   /** Page group 2a — company research. */
@@ -365,7 +396,7 @@ Produce the "Research & Analysis / Insights" section. Return JSON with exactly t
 }
 ${this.citationRule}`;
 
-    return this.completeJSON(prompt, { maxTokens: 4000, label: 'research' });
+    return this.completeJSON(prompt, { maxTokens: 6000, label: 'research' });
   }
 
   /** Page group 2b — business model, initiatives, financials and SWOT. */
@@ -395,7 +426,7 @@ Produce the "Business Model / Strategic Initiatives / Financials / SWOT" section
 }
 ${this.citationRule}`;
 
-    return this.completeJSON(prompt, { maxTokens: 4000, label: 'strategy' });
+    return this.completeJSON(prompt, { maxTokens: 6000, label: 'strategy' });
   }
 
   /** Page group 3 — the value story the rep actually pitches. */
@@ -426,13 +457,13 @@ Produce the "Value" section - the argument the rep makes in the room. Return JSO
     "challengesObstacles": [3 items],  // what stands in the way
     "valuePaths":          [5 items]   // concrete workstreams the seller can own, each with a measurable outcome
   },
-  "valuePropositions": [5 objects],    // {"title": "short name", "body": "90-130 word pitch naming the seller capability, the prospect's situation and the expected business outcome", "citations":[n]}
-  "hypotheses": [4 items],             // testable bets about where value is trapped, phrased "If X, then Y"
-  "pointOfView": [4 items]             // the seller's candid read of the account: what is really going on and where to push
+  "valuePropositions": [5 objects],    // {"title": "short name", "body": "140-190 word pitch: the prospect's situation with its figures, the seller capability by name, how it is delivered, and the expected business outcome with a number or timeframe", "citations":[n]}
+  "hypotheses": [4 items],             // testable bets about where value is trapped, phrased "If X, then Y", each with the evidence behind the bet and how to test it on a call
+  "pointOfView": [4 items]             // the seller's candid read of the account: what is really going on, where to push, and what would make this deal stall
 }
 ${this.citationRule}`;
 
-    return this.completeJSON(prompt, { maxTokens: 5000, label: 'value' });
+    return this.completeJSON(prompt, { maxTokens: 8000, label: 'value' });
   }
 
   /** Short natural-language read on why the account scored the way it did. */
@@ -443,9 +474,9 @@ ${this.citationRule}`;
 The prospect scored ${score.value}/100 on fit for this seller. Signal breakdown: ${JSON.stringify(score.breakdown)}.
 Contributing observations: ${score.reasons.join('; ') || 'none'}.
 
-Return JSON: {"summary": "one sentence, max 32 words, explaining what the score means for prioritising this account"}`;
+Return JSON: {"summary": "two or three sentences, 45-60 words: what drove the score, what it means for prioritising this account, and the single move that would raise it"}`;
 
-      const result = await this.completeJSON(prompt, { maxTokens: 300, label: 'score summary' });
+      const result = await this.completeJSON(prompt, { maxTokens: 600, label: 'score summary' });
       return result?.summary || '';
     } catch (_) {
       return '';
