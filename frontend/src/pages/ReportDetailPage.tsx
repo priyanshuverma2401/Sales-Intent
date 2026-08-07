@@ -30,6 +30,7 @@ import {
   ReportSection,
   SourcesList,
   SubSection,
+  TalkingPointList,
 } from '../components/ReportSections';
 
 // The report reads as one continuous document, the same order as the exported
@@ -630,9 +631,9 @@ export default function ReportDetailPage() {
         <ReportSection
           id="talking-points"
           title="Talking Points"
-          description="Openers you can say out loud on the first call."
+          description="Say these out loud on the call — each one carries the fact, the question to ask, the proof to drop and the pushback to expect."
         >
-          <InsightList items={brief.talkingPoints} sources={sources} tone="brand" />
+          <TalkingPointList items={brief.talkingPoints} sources={sources} />
         </ReportSection>
 
         {brief.executivePerspective?.length ? (

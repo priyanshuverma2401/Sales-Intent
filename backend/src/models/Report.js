@@ -7,6 +7,19 @@ const insightSchema = new mongoose.Schema({
   citations: [Number],
 }, { _id: false });
 
+// A talking point is read mid-conversation, so it carries the spoken body plus
+// the three things a rep needs next: what to ask, what to prove it with, and
+// what to say when it is pushed back on. Only `text` is guaranteed - reports
+// written before this shape existed hold nothing else.
+const talkingPointSchema = new mongoose.Schema({
+  headline: String,
+  text: String,
+  question: String,
+  proof: String,
+  objection: String,
+  citations: [Number],
+}, { _id: false });
+
 const reportSchema = new mongoose.Schema({
   companyId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -75,7 +88,7 @@ const reportSchema = new mongoose.Schema({
     opportunities: [insightSchema],
     challenges: [insightSchema],
     peopleUpdates: [insightSchema],
-    talkingPoints: [insightSchema],
+    talkingPoints: [talkingPointSchema],
     topNews: [{
       title: String,
       summary: String,

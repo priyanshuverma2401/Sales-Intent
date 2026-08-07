@@ -11,6 +11,16 @@ export interface Insight {
   citations?: number[];
 }
 
+// Talking points carry more than a claim - see the note on the Mongo schema.
+// Every field but `text` is optional: reports generated before this shape
+// existed hold a plain insight and still render as a body-only point.
+export interface TalkingPoint extends Insight {
+  headline?: string;
+  question?: string;
+  proof?: string;
+  objection?: string;
+}
+
 export interface Source {
   index: number;
   title: string;
@@ -103,6 +113,80 @@ export function InsightList({
         </li>
       ))}
     </ul>
+  );
+}
+
+// One cue under a talking point: what to ask, what to prove it with, what to
+// say when it is pushed back on.
+function Cue({ label, text, tone }: { label: string; text?: string; tone: string }) {
+  if (!text) return null;
+
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
+      <span
+        className={cx(
+          'shrink-0 pt-[3px] text-2xs font-bold uppercase tracking-[0.12em] sm:w-32',
+          tone
+        )}
+      >
+        {label}
+      </span>
+      <p className="min-w-0 text-[13.5px] leading-relaxed text-ink-soft">{text}</p>
+    </div>
+  );
+}
+
+export function TalkingPointList({
+  items,
+  sources,
+}: {
+  items?: TalkingPoint[];
+  sources: Source[];
+}) {
+  if (!items?.length) {
+    return (
+      <p className="text-[13px] italic text-ink-faint">
+        No supporting evidence was found for this section.
+      </p>
+    );
+  }
+
+  return (
+    <ol className="space-y-4">
+      {items.map((item, i) => (
+        <li
+          key={i}
+          className="print-block rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3.5"
+        >
+          <div className="flex gap-3">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-500 text-[11px] font-bold text-white">
+              {i + 1}
+            </span>
+
+            <div className="min-w-0 flex-1">
+              {item.headline && (
+                <h4 className="text-[14.5px] font-semibold leading-snug text-ink">
+                  {item.headline}
+                </h4>
+              )}
+
+              <p className={cx('report-body', item.headline && 'mt-1')}>
+                {item.text}
+                <Citations citations={item.citations} sources={sources} />
+              </p>
+
+              {(item.question || item.proof || item.objection) && (
+                <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                  <Cue label="Ask" text={item.question} tone="text-brand-700" />
+                  <Cue label="Proof" text={item.proof} tone="text-emerald-700" />
+                  <Cue label="If they push back" text={item.objection} tone="text-amber-700" />
+                </div>
+              )}
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 

@@ -321,6 +321,95 @@ class ReportGenerator {
     list.forEach(item => this.bullet(doc, ctx, item, options));
   }
 
+  /**
+   * A talking point is a small script rather than a bullet: a headline to find
+   * it by, the spoken body, then the ask / proof / objection cues. Each element
+   * breaks independently so a long point flows onto the next page instead of
+   * being squeezed.
+   */
+  talkingPoint(doc, ctx, item, index) {
+    const point = typeof item === 'string' ? { text: item } : (item || {});
+    const body = point.text || '';
+    if (!body && !point.headline) return;
+
+    const indent = 16;
+    const width = CONTENT_WIDTH - indent;
+    const citations = Array.isArray(point.citations) ? point.citations : [];
+
+    // Keep the heading with the opening lines of its body
+    this.ensure(doc, ctx, 78);
+    const top = doc.y;
+
+    doc.save();
+    doc.circle(MARGIN + 4, top + 4.6, 3).fill(C.brand);
+    doc.restore();
+
+    const heading = point.headline || this.truncate(body, 70);
+    doc.font(F.bold).fontSize(10).fillColor(C.brandDark)
+      .text(`${index + 1}. ${heading}`.toUpperCase(), MARGIN + indent, top, {
+        width,
+        characterSpacing: 0.4,
+      });
+    doc.moveDown(0.32);
+
+    if (body) {
+      doc.font(F.regular).fontSize(9.5).fillColor(C.body)
+        .text(body, MARGIN + indent, doc.y, {
+          width,
+          lineGap: 1.7,
+          continued: citations.length > 0,
+        });
+
+      if (citations.length) {
+        doc.font(F.bold).fontSize(7).fillColor(C.link)
+          .text(`  ${citations.map(n => `[${n}]`).join(' ')}`, { lineGap: 1.7 });
+      }
+
+      doc.moveDown(0.3);
+    }
+
+    this.cueLine(doc, ctx, 'ASK', point.question, C.brand);
+    this.cueLine(doc, ctx, 'PROOF', point.proof, C.green);
+    this.cueLine(doc, ctx, 'IF THEY PUSH BACK', point.objection, C.amber);
+
+    doc.moveDown(0.55);
+  }
+
+  // Label + body on one flowing block, so the cue reads as an aside to the point
+  cueLine(doc, ctx, label, text, color) {
+    if (!text) return;
+
+    const indent = 26;
+    const width = CONTENT_WIDTH - indent;
+
+    doc.font(F.regular).fontSize(9);
+    const height = doc.heightOfString(text, { width, lineGap: 1.5 });
+    this.ensure(doc, ctx, Math.min(height + 14, 140));
+
+    doc.font(F.bold).fontSize(8).fillColor(color)
+      .text(`${label}  `, MARGIN + indent, doc.y, {
+        width,
+        lineGap: 1.5,
+        characterSpacing: 0.4,
+        continued: true,
+      });
+    doc.font(F.regular).fontSize(9).fillColor(C.body)
+      .text(text, { characterSpacing: 0, lineGap: 1.5 });
+
+    doc.moveDown(0.28);
+  }
+
+  talkingPointList(doc, ctx, items) {
+    const list = (items || []).filter(Boolean);
+
+    if (!list.length) {
+      this.emptyNote(doc, ctx);
+      return;
+    }
+
+    list.forEach((item, i) => this.talkingPoint(doc, ctx, item, i));
+  }
+
   emptyNote(doc, ctx) {
     this.ensure(doc, ctx, 26);
     doc.font(F.italic).fontSize(9).fillColor(C.muted)
@@ -542,7 +631,7 @@ class ReportGenerator {
     this.newsList(doc, ctx, brief.topNews);
 
     this.h1(doc, ctx, 'Talking Points');
-    this.bulletList(doc, ctx, brief.talkingPoints, { color: C.brand });
+    this.talkingPointList(doc, ctx, brief.talkingPoints);
 
     if (brief.executivePerspective?.length) {
       this.h1(doc, ctx, 'Executive Perspective');
