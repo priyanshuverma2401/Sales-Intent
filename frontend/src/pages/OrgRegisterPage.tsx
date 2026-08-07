@@ -105,8 +105,8 @@ export default function OrgRegisterPage() {
       aside={{
         heading: 'Tell us what you sell. We will tell your team who needs it.',
         points: [
-          'Your capabilities become the seller half of every report your reps generate.',
-          'Reps add their own vertical focus and the solutions they pitch.',
+          'Your company profile is the lens for every report your team generates.',
+          'Add relevant topics later and mark the ones that matter most as high priority.',
           'Anyone with your email domain can then claim a seat.',
         ],
       }}

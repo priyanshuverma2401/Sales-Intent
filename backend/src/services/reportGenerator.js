@@ -58,7 +58,7 @@ class ReportGenerator {
 
   /**
    * @param {object} report  the saved Report document (or a plain equivalent)
-   * @param {object} meta    { company, seller, profile }
+   * @param {object} meta    { company, seller, reader }
    */
   async generate(report, meta = {}) {
     const fileName = `salesmotion-${this.slug(report.companyName)}-${Date.now()}.pdf`;
@@ -454,9 +454,9 @@ class ReportGenerator {
     const context = report.context || {};
     const contextRows = [
       ['Prepared for', context.sellerName || meta.seller?.name],
-      ['Vertical', context.vertical],
-      ['Pitch focus', (context.keywords || []).join(', ')],
-      ['Capabilities', (context.verticalCapabilities || []).slice(0, 4).join(', ')],
+      ['Priority topics', (context.priorityTopics || []).join(', ')],
+      ['Other topics', (context.topics || []).slice(0, 6).join(', ')],
+      ['Capabilities', (context.sellerCapabilities || []).slice(0, 4).join(', ')],
       ['Account added', this.day(report.accountAddedAt || meta.company?.addedAt)],
       // Regenerating writes a new report, so for this one the two are minutes
       // apart; lastUpdatedAt is when the pipeline finished writing it

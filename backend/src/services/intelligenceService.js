@@ -288,13 +288,18 @@ class IntelligenceService {
   /**
    * @param {object} opts
    * @param {object} opts.company  prospect document
-   * @param {object} opts.seller   organization.toSellerContext()
-   * @param {object} opts.profile  user.toSellerProfile(overrideKeywords)
+   * @param {object} opts.seller   organization.toSellerContext() - the only lens
    * @param {object} [opts.crm]     CrmRecord.toContext(), when a CRM is connected
    * @param {function} [opts.onProgress] (step, percent) => void
    */
-  async buildIntelligence({ company, seller, profile, crm = null, onProgress = () => {} }) {
-    const keywords = profile.keywords || [];
+  async buildIntelligence({ company, seller, crm = null, onProgress = () => {} }) {
+    // High-priority topics first, so the evidence search leans the same way the
+    // prompt does rather than pulling news for incidental subjects.
+    const keywords = [
+      ...(seller.priorityTopics || []),
+      ...(seller.standardTopics || []),
+      ...(seller.priorityTopics?.length || seller.standardTopics?.length ? [] : seller.capabilities || []),
+    ].filter(Boolean);
 
     onProgress('Gathering news, filings and hiring data', 10);
     const evidence = await this.gather(company, keywords);
@@ -304,7 +309,6 @@ class IntelligenceService {
       company,
       news: evidence.news,
       jobs: evidence.jobs,
-      profile,
       seller,
       crm,
     });
@@ -325,7 +329,7 @@ class IntelligenceService {
       },
     };
 
-    const context = aiEngine.buildContext({ seller, profile, prospect, crm });
+    const context = aiEngine.buildContext({ seller, prospect, crm });
 
     // The brief is generated first because the value section builds on it. The
     // two research passes are independent, so they ride alongside it.

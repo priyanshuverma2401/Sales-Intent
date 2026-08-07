@@ -107,13 +107,33 @@ organizationSchema.pre('save', function (next) {
   next();
 });
 
-// The seller context handed to the AI engine for every report
+/**
+ * The one and only seller lens. Since the employee persona was removed, this is
+ * the complete input to a report: every field an admin fills in on the company
+ * profile reaches the prompt, the score or both.
+ *
+ * Topics keep their priority all the way through - a `high` topic is what the
+ * report is written around, a `normal` one is context - so the flags are carried
+ * here rather than flattened into a bare list of names.
+ */
 organizationSchema.methods.toSellerContext = function () {
+  const topics = (this.relevantTopics || [])
+    .filter(t => t?.name)
+    .map(t => ({ name: t.name, priority: t.priority === 'high' ? 'high' : 'normal' }));
+
+  const priorityTopics = topics.filter(t => t.priority === 'high').map(t => t.name);
+  const standardTopics = topics.filter(t => t.priority !== 'high').map(t => t.name);
+  const capabilities = this.capabilities || [];
+
   return {
     name: this.name,
+    website: this.website,
     industry: this.industry,
+    headquarters: this.headquarters,
+    employeeBand: this.employeeBand,
     description: this.description,
-    capabilities: this.capabilities || [],
+
+    capabilities,
     capabilityNotes: this.capabilityNotes,
     valuePropositions: this.valuePropositions || [],
     differentiators: this.differentiators || [],
@@ -129,12 +149,22 @@ organizationSchema.methods.toSellerContext = function () {
     caseStudies: this.caseStudies,
     industryTerminology: this.industryTerminology,
 
-    relevantTopics: (this.relevantTopics || []).map(t => t.name),
+    topics,
+    priorityTopics,
+    standardTopics,
     relevantTechnologies: this.relevantTechnologies || [],
     // Titles are flattened to "Director (AI, Automation)" so the prompt reads
     // as prose rather than nested JSON.
     relevantContactTitles: flattenTitles(this.relevantContactTitles),
     relevantHiringTitles: flattenTitles(this.relevantHiringTitles),
+
+    // What the whole report is argued around. High-priority topics win; without
+    // any, every monitored topic counts; without those, what the company sells.
+    focusTerms: priorityTopics.length
+      ? priorityTopics
+      : standardTopics.length
+        ? standardTopics
+        : capabilities,
   };
 };
 

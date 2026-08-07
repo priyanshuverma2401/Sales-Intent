@@ -3,7 +3,7 @@
 // stable between runs and the reasons can be shown to the user.
 
 const BASE_WEIGHTS = {
-  keywordFit: 35,       // does their public activity match what we pitch
+  keywordFit: 35,       // does their public activity match the topics we monitor
   buyingSignals: 20,    // earnings/M&A/funding/executive events
   hiringSignals: 20,    // are they hiring into the departments we sell to
   newsMomentum: 15,     // is anything happening at all, recently
@@ -131,24 +131,29 @@ function scoreCrm(crm, weight) {
   return { points: clamp(points, weight), reasons };
 }
 
+// A high-priority topic counts for twice as much as a standard one, in both
+// coverage and density. Without this an account matching three incidental
+// topics would outrank one matching the single subject the company cares about.
+const PRIORITY_WEIGHT = { high: 2, normal: 1 };
+
 /**
  * @param {object} input
  * @param {object} input.company    prospect record
  * @param {Array}  input.news       normalised news articles
  * @param {Array}  input.jobs       open positions
- * @param {object} input.profile    seller profile (keywords, vertical caps, target departments)
- * @param {object} input.seller     organization (capabilities)
+ * @param {object} input.seller     organization.toSellerContext() - the only lens
  * @param {object} [input.crm]      CrmRecord.toContext(), when a CRM is connected
  */
-function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller = {}, crm = null }) {
+function scoreAccount({ company = {}, news = [], jobs = [], seller = {}, crm = null }) {
   const reasons = [];
   // Every component below is capped against this set, so connecting a CRM
   // rebalances the score rather than adding a sixth component on top of 100.
   const WEIGHTS = crm?.matched !== false && crm ? CRM_WEIGHTS : BASE_WEIGHTS;
-  const keywords = (profile.keywords || []).filter(Boolean);
+
+  const topics = (seller.topics || []).filter(t => t?.name);
   const capabilities = [
-    ...(profile.verticalCapabilities || []),
     ...(seller.capabilities || []),
+    ...(seller.relevantTechnologies || []),
   ].filter(Boolean);
 
   const newsText = normalise(news.map(n => `${n.title} ${n.description || ''}`).join(' '));
@@ -156,16 +161,25 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
   const profileText = normalise(`${company.description || ''} ${company.industry || ''}`);
   const allText = `${newsText} ${jobsText} ${profileText}`;
 
-  // --- 1. Keyword fit ------------------------------------------------------
+  // --- 1. Topic fit --------------------------------------------------------
+  // Coverage and density are both weighted by topic priority, so the score
+  // answers "does this account move on the subjects we actually care about?"
   let keywordFit = 0;
-  if (keywords.length === 0) {
-    // No lens configured: award a neutral middle score rather than punishing
+  if (topics.length === 0) {
+    // No topics configured: award a neutral middle score rather than punishing
     keywordFit = WEIGHTS.keywordFit * 0.5;
-    reasons.push('No pitch keywords configured — score is based on general signals only');
+    reasons.push('No relevant topics configured on the company profile — score is based on general signals only');
   } else {
-    const hits = countMatches(allText, keywords);
-    const coverage = hits.size / keywords.length;
-    const density = Array.from(hits.values()).reduce((a, b) => a + b, 0);
+    const hits = countMatches(allText, topics.map(t => t.name));
+    const weightOf = name =>
+      PRIORITY_WEIGHT[topics.find(t => t.name === name)?.priority] || PRIORITY_WEIGHT.normal;
+
+    const totalWeight = topics.reduce((sum, t) => sum + (PRIORITY_WEIGHT[t.priority] || 1), 0);
+    const matchedWeight = Array.from(hits.keys()).reduce((sum, name) => sum + weightOf(name), 0);
+    const density = Array.from(hits.entries())
+      .reduce((sum, [name, count]) => sum + count * weightOf(name), 0);
+
+    const coverage = totalWeight ? matchedWeight / totalWeight : 0;
 
     keywordFit = clamp(
       WEIGHTS.keywordFit * (coverage * 0.7 + Math.min(density / 12, 1) * 0.3),
@@ -173,15 +187,23 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
     );
 
     if (hits.size) {
+      // High-priority matches are named first: they are the reason to act
+      const matched = Array.from(hits.keys()).sort((a, b) => weightOf(b) - weightOf(a));
+      const priorityMatched = matched.filter(name => weightOf(name) > 1);
+
       reasons.push(
-        `Public activity mentions ${Array.from(hits.keys()).join(', ')} (${density} reference${density === 1 ? '' : 's'})`
+        `Public activity mentions ${matched.join(', ')} (${density} weighted reference${density === 1 ? '' : 's'})` +
+          (priorityMatched.length ? ` — including high-priority ${priorityMatched.join(', ')}` : '')
       );
     } else {
-      reasons.push(`No public mention of ${keywords.join(', ')} yet — this is a create-the-need play`);
+      reasons.push(
+        `No public mention of ${topics.map(t => t.name).join(', ')} yet — this is a create-the-need play`
+      );
     }
   }
 
-  // Capability adjacency tops up the keyword score when the pitch words are absent
+  // Capability and technology adjacency tops up the score when the monitored
+  // topics themselves are absent from the public record
   const capabilityHits = countMatches(allText, capabilities);
   if (capabilityHits.size) {
     keywordFit = clamp(keywordFit + Math.min(capabilityHits.size * 1.5, 6), WEIGHTS.keywordFit);
@@ -199,13 +221,20 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
   }
 
   // --- 3. Hiring signals ---------------------------------------------------
-  const departments = (profile.targetDepartments || []).filter(Boolean);
+  const departments = (seller.targetDepartments || []).filter(Boolean);
+  // Flattened as "Director (AI, Automation)" for the prompt; only the title
+  // itself is worth matching a job posting against.
+  const hiringTitles = (seller.relevantHiringTitles || [])
+    .map(t => String(t).split(' (')[0].trim())
+    .filter(Boolean);
+  const wanted = [...departments, ...hiringTitles];
+
   let hiringSignals = 0;
   if (jobs.length) {
-    const targeted = departments.length
+    const targeted = wanted.length
       ? jobs.filter(j => {
           const text = normalise(`${j.title || ''} ${j.department || ''}`);
-          return departments.some(d => text.includes(normalise(d)));
+          return wanted.some(d => text.includes(normalise(d)));
         })
       : [];
 
@@ -216,7 +245,7 @@ function scoreAccount({ company = {}, news = [], jobs = [], profile = {}, seller
 
     reasons.push(
       targeted.length
-        ? `Hiring ${targeted.length} role${targeted.length === 1 ? '' : 's'} in your target departments`
+        ? `Hiring ${targeted.length} role${targeted.length === 1 ? '' : 's'} in the departments and titles you track`
         : `${jobs.length} open role${jobs.length === 1 ? '' : 's'} detected`
     );
   }

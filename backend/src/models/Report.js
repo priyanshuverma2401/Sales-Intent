@@ -21,15 +21,17 @@ const reportSchema = new mongoose.Schema({
   organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
 
-  // Frozen copy of the lens used, so an old report still explains itself after
-  // the seller edits their profile.
+  // Frozen copy of the company profile the report was written from, so an old
+  // report still explains itself after an admin edits that profile.
   context: {
     sellerName: String,
     sellerCapabilities: [String],
     sellerValuePropositions: [String],
-    vertical: String,
-    verticalCapabilities: [String],
-    keywords: [String],
+    // The monitored topics, split by the priority they carried at the time
+    priorityTopics: [String],
+    topics: [String],
+    technologies: [String],
+    targetIndustries: [String],
     targetDepartments: [String],
   },
 

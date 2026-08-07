@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { accountsAPI, apiError, companiesAPI, reportsAPI } from '../services/api';
+import { useAuthStore, focusTopics } from '../store/authStore';
 import AddAccountModal from '../components/AddAccountModal';
 import {
   Alert,
@@ -36,8 +37,6 @@ interface Account {
   logoUrl?: string;
   employees?: number;
   signalCount: number;
-  keywords: string[];
-  effectiveKeywords: string[];
   notes?: string;
   financials?: { marketCap?: number; peRatio?: number };
   stock?: { currentPrice?: number };
@@ -62,6 +61,13 @@ function money(value?: number) {
 
 export default function AccountsPage() {
   const navigate = useNavigate();
+  const { organization } = useAuthStore();
+
+  // Every account in the tenant is read through the same lens - the company
+  // profile - so it is shown once here rather than repeated on every row.
+  const { high: priorityTopics, all: allTopics } = focusTopics(organization);
+  const lens = priorityTopics.length ? priorityTopics : allTopics;
+
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -129,7 +135,7 @@ export default function AccountsPage() {
       await reportsAPI.generate(account._id);
       setMessage({
         tone: 'info',
-        text: `Generating a ${account.effectiveKeywords.join(' / ') || 'capability'} report for ${account.name} — about a minute.`,
+        text: `Generating a ${lens.join(' / ') || 'capability'} report for ${account.name} — about a minute.`,
       });
       load(true);
     } catch (err) {
@@ -171,6 +177,24 @@ export default function AccountsPage() {
           <Alert tone={message.tone} onDismiss={() => setMessage(null)}>
             {message.text}
           </Alert>
+        </div>
+      )}
+
+      {/* The shared lens, stated once */}
+      {lens.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-1.5">
+          <Sparkles size={13} className="text-brand-500" />
+          <span className="text-2xs font-bold uppercase tracking-wider text-ink-faint">
+            Every account is read for
+          </span>
+          {lens.map((topic) => (
+            <span
+              key={topic}
+              className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+            >
+              {topic}
+            </span>
+          ))}
         </div>
       )}
 
@@ -223,7 +247,7 @@ export default function AccountsPage() {
         <EmptyState
           icon={Building2}
           title="No accounts yet"
-          description="Add a company and we will research it against your capabilities and pitch keywords, then build the report."
+          description="Add a company and we will research it against your company profile — what you sell and the topics you monitor — then build the report."
           action={
             <Button icon={Plus} onClick={() => setModalOpen(true)}>
               Add your first account
@@ -284,27 +308,6 @@ export default function AccountsPage() {
                       <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-ink-soft">
                         {account.description}
                       </p>
-                    )}
-
-                    {/* Pitch lens */}
-                    {account.effectiveKeywords.length > 0 && (
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                        <Sparkles size={13} className="text-brand-500" />
-                        <span className="text-2xs font-bold uppercase tracking-wider text-ink-faint">
-                          Pitching
-                        </span>
-                        {account.effectiveKeywords.map((k) => (
-                          <span
-                            key={k}
-                            className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
-                          >
-                            {k}
-                          </span>
-                        ))}
-                        {account.keywords.length === 0 && (
-                          <span className="text-2xs text-ink-faint">(profile default)</span>
-                        )}
-                      </div>
                     )}
 
                     {/* Facts */}
@@ -443,7 +446,7 @@ export default function AccountsPage() {
 
       {accounts.length > 0 && (
         <p className="mt-6 text-center text-[13px] text-ink-muted">
-          Change what you pitch across every account in{' '}
+          Change what every account is read for in the company profile under{' '}
           <Link to="/settings" className="font-semibold text-brand-600 hover:underline">
             Settings
           </Link>

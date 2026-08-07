@@ -12,7 +12,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { accountsAPI, reportsAPI, signalsAPI } from '../services/api';
-import { useAuthStore, needsOnboarding } from '../store/authStore';
+import { useAuthStore, companyProfileIncomplete, focusTopics } from '../store/authStore';
 import AddAccountModal from '../components/AddAccountModal';
 import {
   Badge,
@@ -52,8 +52,12 @@ export default function DashboardPage() {
     load();
   }, []);
 
-  const keywords = user?.profile?.keywords || [];
-  const incomplete = needsOnboarding(user);
+  const { high: priorityTopics, rest: otherTopics, all: allTopics } = focusTopics(organization);
+  const incomplete = companyProfileIncomplete(organization);
+  const isAdmin = user?.role === 'owner' || user?.role === 'admin';
+  // Priority topics are what the report is argued around; without any, every
+  // monitored topic counts equally.
+  const lens = priorityTopics.length ? priorityTopics : allTopics;
 
   // The board a rep actually wants: their highest-scoring accounts first
   const ranked = useMemo(
@@ -74,9 +78,9 @@ export default function DashboardPage() {
         eyebrow={organization?.name}
         title={`Good to see you, ${user?.firstName || 'there'}`}
         description={
-          keywords.length
-            ? `Every account below is read for where they need ${keywords.join(' and ')}.`
-            : 'Set your pitch keywords so we can tell you which accounts need what you sell.'
+          lens.length
+            ? `Every account below is read for where they need ${lens.join(' and ')}.`
+            : 'Add relevant topics to the company profile so we can tell you which accounts need what you sell.'
         }
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
@@ -85,7 +89,7 @@ export default function DashboardPage() {
         }
       />
 
-      {/* Onboarding nudge */}
+      {/* Company profile nudge. Only owners and admins can act on it. */}
       {incomplete && (
         <Card className="mb-6 border-brand-200 bg-gradient-to-br from-brand-50 to-surface p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -94,16 +98,19 @@ export default function DashboardPage() {
                 <Target size={19} className="text-white" />
               </span>
               <div>
-                <h2 className="text-base font-bold text-ink">Tell us what you sell</h2>
+                <h2 className="text-base font-bold text-ink">Complete your company profile</h2>
                 <p className="mt-1 max-w-xl text-sm leading-relaxed text-ink-soft">
-                  Your vertical, the capabilities you take to market and the solutions you pitch
-                  decide what every report focuses on. It takes about a minute.
+                  What your company sells and the topics it monitors decide what every report
+                  focuses on — and topics marked high priority lead the analysis.
+                  {!isAdmin && ' Only an owner or admin can fill this in.'}
                 </p>
               </div>
             </div>
-            <Button onClick={() => navigate('/settings')}>
-              Complete setup <ArrowRight size={15} />
-            </Button>
+            {isAdmin && (
+              <Button onClick={() => navigate('/settings')}>
+                Complete setup <ArrowRight size={15} />
+              </Button>
+            )}
           </div>
         </Card>
       )}
@@ -211,18 +218,6 @@ export default function DashboardPage() {
                     <p className="mt-0.5 truncate text-[13px] text-ink-muted">
                       {[account.industry, account.country].filter(Boolean).join(' · ')}
                     </p>
-                    {account.effectiveKeywords?.length ? (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {account.effectiveKeywords.slice(0, 3).map((k: string) => (
-                          <span
-                            key={k}
-                            className="rounded bg-slate-100 px-1.5 py-0.5 text-2xs font-medium text-ink-muted"
-                          >
-                            {k}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                   <ArrowRight size={16} className="shrink-0 text-ink-faint" />
                 </button>
@@ -233,38 +228,51 @@ export default function DashboardPage() {
 
         {/* Right rail */}
         <div className="space-y-6">
-          {/* Pitch lens */}
+          {/* The company profile lens every report is written through */}
           <Card className="card-pad">
             <h3 className="mb-3 flex items-center gap-1.5 text-2xs font-bold uppercase tracking-[0.12em] text-brand-600">
-              <Sparkles size={13} /> Your pitch lens
+              <Sparkles size={13} /> Report focus
             </h3>
 
             <dl className="space-y-3 text-[13px]">
               <div>
-                <dt className="font-semibold text-ink-faint">Vertical</dt>
-                <dd className="mt-0.5 text-ink-soft">{user?.profile?.vertical || 'Not set'}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold text-ink-faint">Pitching</dt>
+                <dt className="font-semibold text-ink-faint">High-priority topics</dt>
                 <dd className="mt-1 flex flex-wrap gap-1.5">
-                  {keywords.length ? (
-                    keywords.map((k) => (
+                  {priorityTopics.length ? (
+                    priorityTopics.map((topic) => (
                       <span
-                        key={k}
-                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                        key={topic}
+                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700"
                       >
-                        {k}
+                        {topic}
                       </span>
                     ))
                   ) : (
-                    <span className="text-ink-faint">Not set</span>
+                    <span className="text-ink-faint">None marked</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-ink-faint">Other topics</dt>
+                <dd className="mt-1 flex flex-wrap gap-1.5">
+                  {otherTopics.length ? (
+                    otherTopics.map((topic) => (
+                      <span
+                        key={topic}
+                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                      >
+                        {topic}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-ink-faint">None</span>
                   )}
                 </dd>
               </div>
               <div>
                 <dt className="font-semibold text-ink-faint">Capabilities</dt>
                 <dd className="mt-0.5 text-ink-soft">
-                  {user?.profile?.verticalCapabilities?.join(', ') || 'Not set'}
+                  {organization?.capabilities?.join(', ') || 'Not set'}
                 </dd>
               </div>
             </dl>
@@ -273,7 +281,7 @@ export default function DashboardPage() {
               to="/settings"
               className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold text-brand-600 hover:text-brand-700"
             >
-              Edit focus <ArrowRight size={13} />
+              {isAdmin ? 'Edit company profile' : 'View company profile'} <ArrowRight size={13} />
             </Link>
           </Card>
 

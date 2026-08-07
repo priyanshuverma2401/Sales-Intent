@@ -1,15 +1,5 @@
 import { create } from 'zustand';
 
-export interface UserProfile {
-  vertical?: string;
-  verticalCapabilities?: string[];
-  keywords?: string[];
-  targetDepartments?: string[];
-  targetRoles?: string[];
-  region?: string;
-  completedOnboarding?: boolean;
-}
-
 export interface User {
   _id: string;
   firstName: string;
@@ -19,8 +9,13 @@ export interface User {
   jobTitle?: string;
   role: 'owner' | 'admin' | 'member';
   organizationId?: string;
-  profile?: UserProfile;
   watchlist?: any[];
+}
+
+/** A monitored subject. `high` is what reports are written around. */
+export interface Topic {
+  name: string;
+  priority: 'normal' | 'high';
 }
 
 export interface Organization {
@@ -39,6 +34,8 @@ export interface Organization {
   targetIndustries?: string[];
   targetDepartments?: string[];
   targetRoles?: string[];
+  relevantTopics?: Topic[];
+  relevantTechnologies?: string[];
   subscription?: {
     plan: string;
     seats: number;
@@ -107,9 +104,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 }));
 
-/** True when the rep has not yet told us enough for reports to be targeted. */
-export function needsOnboarding(user: User | null) {
-  if (!user) return false;
-  const p = user.profile;
-  return !(p?.vertical && p?.verticalCapabilities?.length && p?.keywords?.length);
+/** The subjects reports are written around, high priority first. */
+export function focusTopics(organization: Organization | null) {
+  const topics = organization?.relevantTopics || [];
+  const high = topics.filter((t) => t.priority === 'high').map((t) => t.name);
+  const rest = topics.filter((t) => t.priority !== 'high').map((t) => t.name);
+  return { high, rest, all: [...high, ...rest] };
+}
+
+/**
+ * True when the company profile carries nothing for a report to argue from.
+ * Only an owner or admin can fix it, so the prompt has to say so.
+ */
+export function companyProfileIncomplete(organization: Organization | null) {
+  if (!organization) return false;
+  return !(organization.relevantTopics?.length || organization.capabilities?.length);
 }

@@ -6,12 +6,6 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
-function toStringArray(value) {
-  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
-  if (typeof value === 'string') return value.split(',').map(v => v.trim()).filter(Boolean);
-  return [];
-}
-
 // Matches a company against a free-text query. The watchlist is an embedded
 // array rather than its own collection, so this is a plain predicate rather
 // than a Mongo filter - but the query still arrives as ?q= like every other
@@ -25,8 +19,8 @@ function matchesQuery(company, q) {
     .some(field => String(field).toLowerCase().includes(needle));
 }
 
-// The user's accounts, each with its signal count, its pitch lens and the state
-// of its most recent report - everything the accounts board needs in one call.
+// The user's accounts, each with its signal count and the state of its most
+// recent report - everything the accounts board needs in one call.
 //   ?q=hsbc   company name, ticker, industry or country
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -68,11 +62,8 @@ router.get('/', authenticate, async (req, res) => {
       return {
         ...company.toObject(),
         signalCount: countByCompany.get(key) || 0,
-        keywords: entry.keywords || [],
         notes: entry.notes,
         addedAt: entry.addedAt,
-        // Empty keywords means the account inherits the profile default
-        effectiveKeywords: entry.keywords?.length ? entry.keywords : (user.profile?.keywords || []),
         latestReport: report
           ? {
               _id: report._id,
@@ -91,7 +82,8 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// Change the pitch lens for a single account without touching the profile
+// Personal notes on one account. What a report says is decided by the company
+// profile, so there is nothing per-account to steer.
 router.patch('/:companyId', authenticate, async (req, res) => {
   try {
     const entry = (req.user.watchlist || []).find(
@@ -100,16 +92,11 @@ router.patch('/:companyId', authenticate, async (req, res) => {
 
     if (!entry) return res.status(404).json({ error: 'Account not in your list' });
 
-    if (req.body.keywords !== undefined) entry.keywords = toStringArray(req.body.keywords);
     if (req.body.notes !== undefined) entry.notes = req.body.notes;
 
     await req.user.save();
 
-    res.json({
-      message: 'Account updated',
-      keywords: entry.keywords,
-      notes: entry.notes,
-    });
+    res.json({ message: 'Account updated', notes: entry.notes });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

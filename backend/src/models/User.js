@@ -41,27 +41,12 @@ const userSchema = new mongoose.Schema({
     default: 'member',
   },
 
-  // The employee half of the report prompt. The org supplies what the company
-  // can sell; this supplies the slice of it this person actually sells, and the
-  // themes they want every prospect read through.
-  profile: {
-    // Industry/vertical the employee sells INTO, e.g. "Banking & Financial Services"
-    vertical: String,
-    // Capabilities relevant to that vertical, e.g. "KYC/AML automation"
-    verticalCapabilities: [String],
-    // Pitch themes, e.g. "GenAI solutions", "Copilot solutions". Reports are
-    // written through this lens: how does the prospect need these?
-    keywords: [String],
-    targetDepartments: [String],
-    targetRoles: [String],
-    region: String,
-    completedOnboarding: { type: Boolean, default: false },
-  },
+  // A seat carries no report targeting of its own: every report is written from
+  // the Organization's company profile, so two people at the same company get
+  // the same lens on the same prospect.
 
   watchlist: [{
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
-    // Per-account overrides. Empty means "use my profile defaults".
-    keywords: [String],
     notes: String,
     addedAt: { type: Date, default: Date.now },
   }],
@@ -118,21 +103,13 @@ userSchema.methods.toJSON = function() {
   return user;
 };
 
-// The employee context handed to the AI engine, merged with any per-account
-// keyword override supplied when the prospect was added.
-userSchema.methods.toSellerProfile = function (overrideKeywords) {
-  const profile = this.profile || {};
-  const keywords = overrideKeywords?.length ? overrideKeywords : (profile.keywords || []);
-
+// Who a report is addressed to. Nothing here steers the analysis - it only
+// names the reader on the cover.
+userSchema.methods.toReader = function () {
   return {
     name: `${this.firstName} ${this.lastName}`.trim(),
+    email: this.email,
     jobTitle: this.jobTitle,
-    vertical: profile.vertical,
-    verticalCapabilities: profile.verticalCapabilities || [],
-    keywords,
-    targetDepartments: profile.targetDepartments || [],
-    targetRoles: profile.targetRoles || [],
-    region: profile.region,
   };
 };
 

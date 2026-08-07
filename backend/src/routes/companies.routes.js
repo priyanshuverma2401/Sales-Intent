@@ -12,12 +12,6 @@ const reportService = require('../services/reportService');
 
 const router = express.Router();
 
-function toStringArray(value) {
-  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
-  if (typeof value === 'string') return value.split(',').map(v => v.trim()).filter(Boolean);
-  return [];
-}
-
 // Which fetched fields belong on company.stock vs company.financials
 const STOCK_FIELDS = [
   'currentPrice', 'dayHigh', 'dayLow', 'openPrice', 'previousClose',
@@ -125,12 +119,13 @@ router.get('/search', authenticate, async (req, res) => {
   }
 });
 
-// Add a prospect account. `keywords` sets the pitch lens for this account only;
-// leaving it empty inherits the rep's profile keywords. Report generation kicks
-// off immediately unless the caller opts out.
+// Add a prospect account. What the report focuses on comes from the tenant's
+// company profile, so the only inputs here are the company itself and an
+// optional personal note. Report generation kicks off immediately unless the
+// caller opts out.
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { name, ticker, keywords, notes, generateReport = true } = req.body;
+    const { name, ticker, notes, generateReport = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Company name required' });
@@ -181,19 +176,16 @@ router.post('/', authenticate, async (req, res) => {
     // Add to the user's account list, avoiding duplicates
     if (!req.user.watchlist) req.user.watchlist = [];
 
-    const accountKeywords = toStringArray(keywords);
     const existing = req.user.watchlist.find(
       w => w.companyId?.toString() === company._id.toString()
     );
 
     if (existing) {
-      // Re-adding is treated as an update of the lens rather than an error
-      if (accountKeywords.length) existing.keywords = accountKeywords;
+      // Re-adding is treated as an update of the note rather than an error
       if (notes !== undefined) existing.notes = notes;
     } else {
       req.user.watchlist.push({
         companyId: company._id,
-        keywords: accountKeywords,
         notes,
         addedAt: new Date(),
       });
@@ -221,7 +213,6 @@ router.post('/', authenticate, async (req, res) => {
 
     res.status(201).json({
       company,
-      keywords: accountKeywords.length ? accountKeywords : (req.user.profile?.keywords || []),
       reportId: report?._id || null,
       reportStatus: report ? 'pending' : null,
       reportError,
@@ -285,12 +276,13 @@ router.post('/:id/refresh', authenticate, async (req, res) => {
 
     console.log(`🔄 Refreshing data for ${company.name}`);
 
-    // Bias the refresh toward whatever this rep pitches into the account, so
-    // the signals that appear are the ones they can act on
-    const entry = (req.user.watchlist || []).find(
-      w => w.companyId?.toString() === company._id.toString()
-    );
-    const keywords = entry?.keywords?.length ? entry.keywords : (req.user.profile?.keywords || []);
+    // Bias the refresh toward the topics the tenant monitors, high priority
+    // first, so the signals that appear are the ones worth acting on
+    const seller = req.organization?.toSellerContext?.() || {};
+    const keywords = [
+      ...(seller.priorityTopics || []),
+      ...(seller.standardTopics || []),
+    ].filter(Boolean);
 
     const [news, financial, jobs] = await Promise.all([
       newsDataFetcher.fetchNews(company.name, company.ticker, keywords),

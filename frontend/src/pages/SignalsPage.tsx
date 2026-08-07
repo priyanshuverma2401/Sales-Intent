@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, ExternalLink, Sparkles } from 'lucide-react';
 import { signalsAPI } from '../services/api';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, focusTopics } from '../store/authStore';
 import { Badge, EmptyState, PageHeader, SkeletonRows, cx } from '../components/ui';
 
 const CATEGORIES = [
@@ -25,7 +25,7 @@ const PRIORITY_TONE: Record<string, 'red' | 'amber' | 'green' | 'neutral'> = {
 };
 
 export default function SignalsPage() {
-  const { user } = useAuthStore();
+  const { organization } = useAuthStore();
   const [signals, setSignals] = useState<any[]>([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -39,14 +39,15 @@ export default function SignalsPage() {
       .finally(() => setLoading(false));
   }, [filter]);
 
-  const keywords = user?.profile?.keywords || [];
+  // High-priority topics only: the point of the flag is that a signal touching
+  // one of them is worth acting on today, and marking everything marks nothing.
+  const { high: priorityTopics, all: allTopics } = focusTopics(organization);
+  const lens = priorityTopics.length ? priorityTopics : allTopics;
 
-  // Surface the ones that mention what the rep is pitching — those are the
-  // signals worth acting on today.
   const matchesLens = (signal: any) => {
-    if (!keywords.length) return false;
+    if (!lens.length) return false;
     const text = `${signal.title || ''} ${signal.description || ''}`.toLowerCase();
-    return keywords.some((k) => text.includes(k.toLowerCase().replace(/\s+solutions?$/, '')));
+    return lens.some((topic) => text.includes(topic.toLowerCase().replace(/\s+solutions?$/, '')));
   };
 
   return (

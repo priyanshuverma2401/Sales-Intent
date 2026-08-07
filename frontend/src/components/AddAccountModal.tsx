@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Loader2, Search } from 'lucide-react';
 import { apiError, companiesAPI } from '../services/api';
-import { useAuthStore } from '../store/authStore';
 import { Alert, Button, Field, Modal } from '../components/ui';
 
 interface SearchResult {
@@ -15,9 +14,9 @@ interface SearchResult {
 }
 
 /**
- * Adding an account asks for one thing: the company. The pitch lens comes from
- * the rep's profile keywords, and the ticker is taken from the search hit when
- * there is one — neither is worth a field here.
+ * Adding an account asks for one thing: the company. What the report focuses on
+ * comes from the tenant's company profile, and the ticker is taken from the
+ * search hit when there is one — neither is worth a field here.
  */
 export default function AddAccountModal({
   open,
@@ -28,9 +27,6 @@ export default function AddAccountModal({
   onClose: () => void;
   onAdded: (result: { companyName: string; reportId?: string | null; reportError?: any }) => void;
 }) {
-  const { user } = useAuthStore();
-  const profileKeywords = user?.profile?.keywords || [];
-
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -94,7 +90,6 @@ export default function AddAccountModal({
       const res = await companiesAPI.addCompany({
         name,
         ticker: selected?.ticker || undefined,
-        keywords: profileKeywords,
         generateReport: true,
       });
 

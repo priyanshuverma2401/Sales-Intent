@@ -124,14 +124,6 @@ router.post('/register-organization', async (req, res) => {
       organizationId: organization._id,
       company: organization.name,
       role: 'owner',
-      profile: {
-        vertical: toStringArray(targetIndustries)[0],
-        verticalCapabilities: capabilityList.slice(0, 6),
-        keywords: [],
-        targetDepartments: toStringArray(targetDepartments),
-        targetRoles: toStringArray(targetRoles),
-        completedOnboarding: false,
-      },
     });
     await user.save();
 
@@ -233,11 +225,7 @@ router.get('/check-email', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/register', resolveOrganizationByEmail, async (req, res) => {
   try {
-    const {
-      firstName, lastName, email, password, jobTitle,
-      vertical, verticalCapabilities, keywords,
-      targetDepartments, targetRoles, region,
-    } = req.body;
+    const { firstName, lastName, email, password, jobTitle } = req.body;
 
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ error: 'Name, email and password are required' });
@@ -261,9 +249,8 @@ router.post('/register', resolveOrganizationByEmail, async (req, res) => {
       });
     }
 
-    const keywordList = toStringArray(keywords);
-    const verticalCapabilityList = toStringArray(verticalCapabilities);
-
+    // A new seat needs no setup of its own: reports are targeted by the
+    // company profile the admin already filled in.
     const user = new User({
       firstName,
       lastName,
@@ -273,21 +260,6 @@ router.post('/register', resolveOrganizationByEmail, async (req, res) => {
       organizationId: organization._id,
       company: organization.name,
       role: 'member',
-      profile: {
-        vertical,
-        verticalCapabilities: verticalCapabilityList,
-        keywords: keywordList,
-        targetDepartments: toStringArray(targetDepartments).length
-          ? toStringArray(targetDepartments)
-          : organization.targetDepartments,
-        targetRoles: toStringArray(targetRoles).length
-          ? toStringArray(targetRoles)
-          : organization.targetRoles,
-        region,
-        // Onboarding is only complete once we have the three inputs that drive
-        // report targeting
-        completedOnboarding: Boolean(vertical && verticalCapabilityList.length && keywordList.length),
-      },
     });
 
     await user.save();
@@ -446,39 +418,62 @@ router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user.toJSON(), organization: req.organization });
 });
 
-// Employee profile - vertical, vertical capabilities, pitch keywords
+// Employee profile. Nothing here steers a report - report targeting lives on
+// the company profile - so this is only who the person is.
 router.patch('/profile', authenticate, async (req, res) => {
   try {
-    const {
-      firstName, lastName, jobTitle,
-      vertical, verticalCapabilities, keywords,
-      targetDepartments, targetRoles, region,
-    } = req.body;
-
+    const { firstName, lastName } = req.body;
     const user = req.user;
 
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
-    if (jobTitle !== undefined) user.jobTitle = jobTitle;
+    if (firstName !== undefined) {
+      if (!String(firstName).trim()) {
+        return res.status(400).json({ error: 'First name cannot be empty' });
+      }
+      user.firstName = String(firstName).trim();
+    }
+    if (lastName !== undefined) {
+      if (!String(lastName).trim()) {
+        return res.status(400).json({ error: 'Last name cannot be empty' });
+      }
+      user.lastName = String(lastName).trim();
+    }
 
-    if (!user.profile) user.profile = {};
-    if (vertical !== undefined) user.profile.vertical = vertical;
-    if (verticalCapabilities !== undefined) user.profile.verticalCapabilities = toStringArray(verticalCapabilities);
-    if (keywords !== undefined) user.profile.keywords = toStringArray(keywords);
-    if (targetDepartments !== undefined) user.profile.targetDepartments = toStringArray(targetDepartments);
-    if (targetRoles !== undefined) user.profile.targetRoles = toStringArray(targetRoles);
-    if (region !== undefined) user.profile.region = region;
-
-    user.profile.completedOnboarding = Boolean(
-      user.profile.vertical &&
-      user.profile.verticalCapabilities?.length &&
-      user.profile.keywords?.length
-    );
     user.updatedAt = new Date();
-
     await user.save();
 
     res.json({ user: user.toJSON(), organization: req.organization });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Change your own password. The current one is required: a session left open on
+// a shared machine should not be enough to lock the owner out of their account.
+router.post('/change-password', authenticate, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password are required' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'The new password must be different from the current one' });
+    }
+
+    const user = req.user;
+
+    if (!(await user.comparePassword(currentPassword))) {
+      return res.status(401).json({ error: 'Your current password is not correct' });
+    }
+
+    user.password = newPassword; // hashed by the pre-save hook
+    user.updatedAt = new Date();
+    await user.save();
+
+    res.json({ message: 'Password updated' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

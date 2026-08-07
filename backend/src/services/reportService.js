@@ -12,20 +12,16 @@ const companyDataFetcher = require('./dataFetchers/companyDataFetcher');
  */
 class ReportService {
   /**
-   * The seller lens for a given user + prospect. Per-account keywords win over
-   * the profile default, so a rep can pitch Copilot into one account and data
-   * migration into another without editing their profile.
+   * The seller lens. It comes entirely from the tenant's company profile, so
+   * every seat generates the same analysis for the same prospect - the rep only
+   * decides which accounts to look at, not how they are read.
    */
-  resolveContext(user, organization, companyId) {
-    const entry = (user.watchlist || []).find(
-      w => w.companyId?.toString() === String(companyId)
-    );
-
+  resolveContext(user, organization) {
     const seller = organization
       ? organization.toSellerContext()
-      : { name: user.company, capabilities: [], valuePropositions: [] };
+      : { name: user.company, capabilities: [], valuePropositions: [], topics: [], focusTerms: [] };
 
-    return { seller, profile: user.toSellerProfile(entry?.keywords), watchlistEntry: entry };
+    return { seller, reader: user.toReader() };
   }
 
   buildFastFacts(company, financial = {}) {
@@ -80,21 +76,25 @@ class ReportService {
     return links;
   }
 
-  /** The lens this report was written through, stored on the Report itself. */
-  buildContextStamp(seller, profile) {
+  /**
+   * The lens this report was written through, frozen onto the Report so an old
+   * report still explains itself after an admin edits the company profile.
+   */
+  buildContextStamp(seller) {
     return {
       sellerName: seller.name,
       sellerCapabilities: seller.capabilities,
       sellerValuePropositions: seller.valuePropositions,
-      vertical: profile.vertical,
-      verticalCapabilities: profile.verticalCapabilities,
-      keywords: profile.keywords,
-      targetDepartments: profile.targetDepartments,
+      priorityTopics: seller.priorityTopics || [],
+      topics: seller.standardTopics || [],
+      technologies: seller.relevantTechnologies || [],
+      targetIndustries: seller.targetIndustries || [],
+      targetDepartments: seller.targetDepartments || [],
     };
   }
 
   /** Why a report cannot be generated yet, or null when it can. */
-  validate(profile) {
+  validate(seller) {
     if (!aiEngine.enabled) {
       return {
         status: 503,
@@ -102,10 +102,10 @@ class ReportService {
         code: 'AI_DISABLED',
       };
     }
-    if (!profile.keywords?.length && !profile.verticalCapabilities?.length) {
+    if (!seller.focusTerms?.length) {
       return {
         status: 400,
-        error: 'Add your vertical capabilities and pitch keywords in Settings first — they decide what the report focuses on.',
+        error: 'The company profile has no capabilities or relevant topics yet. Ask an owner or admin to fill it in under Settings → Company profile — it decides what every report focuses on.',
         code: 'PROFILE_INCOMPLETE',
       };
     }
@@ -117,9 +117,9 @@ class ReportService {
    * the background so the request does not block on ~60s of AI calls.
    */
   async start({ user, organization, company }) {
-    const { seller, profile } = this.resolveContext(user, organization, company._id);
+    const { seller, reader } = this.resolveContext(user, organization);
 
-    const problem = this.validate(profile);
+    const problem = this.validate(seller);
     if (problem) {
       const error = new Error(problem.error);
       error.status = problem.status;
@@ -140,12 +140,12 @@ class ReportService {
       // Stamped up front, not on completion: the lens is known the moment the
       // report is requested, and the reports list filters on it. Writing it only
       // on success left every pending and failed report with no vertical.
-      context: this.buildContextStamp(seller, profile),
+      context: this.buildContextStamp(seller),
     });
     await report.save();
 
     setImmediate(() => {
-      this.run(report, { company, seller, profile, user, organization }).catch(async (error) => {
+      this.run(report, { company, seller, reader, user, organization }).catch(async (error) => {
         console.error('❌ Report generation failed:', error);
 
         // Written with updateOne rather than report.save(): if the failure was a
@@ -168,8 +168,8 @@ class ReportService {
   }
 
   /** The pipeline itself. Persists progress so the UI can show a live step. */
-  async run(report, { company, seller, profile, user, organization }) {
-    console.log(`\n📄 Generating report for ${company.name} (lens: ${profile.keywords?.join(', ') || 'capabilities only'})`);
+  async run(report, { company, seller, reader, user, organization }) {
+    console.log(`\n📄 Generating report for ${company.name} (lens: ${seller.focusTerms?.join(', ') || 'capabilities only'})`);
 
     // Progress is written straight to the collection. Firing report.save() while
     // the pipeline is mid-flight would race the final save and can throw a
@@ -199,12 +199,11 @@ class ReportService {
     const result = await intelligenceService.buildIntelligence({
       company,
       seller,
-      profile,
       crm,
       onProgress: setProgress,
     });
 
-    report.context = this.buildContextStamp(seller, profile);
+    report.context = this.buildContextStamp(seller);
     report.score = result.score;
     report.fastFacts = this.buildFastFacts(company, result.evidence.financial);
     report.quickLinks = this.buildQuickLinks(company);
@@ -218,7 +217,7 @@ class ReportService {
     report.lastUpdatedAt = new Date();
 
     setProgress('Rendering PDF', 95);
-    const { filePath, fileName } = await reportGenerator.generate(report, { seller, profile, company });
+    const { filePath, fileName } = await reportGenerator.generate(report, { seller, reader, company });
 
     report.pdfPath = filePath;
     report.pdfFileName = fileName;
@@ -232,7 +231,7 @@ class ReportService {
         userId: user._id,
         companyId: company._id,
         title: `Report ready: ${company.name}`,
-        message: `Your ${profile.keywords?.length ? `${profile.keywords.join(' / ')} ` : ''}intelligence report for ${company.name} is ready.`,
+        message: `Your ${seller.priorityTopics?.length ? `${seller.priorityTopics.join(' / ')} ` : ''}intelligence report for ${company.name} is ready.`,
         type: 'report_ready',
         relatedReportId: report._id,
         actionUrl: `/reports/${report._id}`,

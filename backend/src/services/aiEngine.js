@@ -8,13 +8,14 @@ const SOURCE_BODY_CHARS = Number(process.env.SOURCE_BODY_CHARS) || 140;
 /**
  * Turns raw prospect research into a seller-specific intelligence report.
  *
- * Everything here is written through three lenses, supplied per request:
- *   1. what the seller's COMPANY can deliver (organization capabilities)
- *   2. what THIS SELLER sells into their vertical (vertical capabilities)
- *   3. the KEYWORDS they want to pitch (e.g. "GenAI", "Copilot")
+ * There is exactly one lens: the seller's COMPANY PROFILE. Every field an admin
+ * fills in - what the company sells, the problems it solves, the proof it can
+ * cite, the titles, technologies and topics it monitors - reaches the prompt.
  *
- * The keyword lens is the strongest: a report for keywords "GenAI, Copilot"
- * must read as "here is where this prospect needs GenAI and Copilot", not as a
+ * Within that profile the monitored TOPICS carry a priority, and the
+ * high-priority ones are the strongest signal in the whole prompt: a report for
+ * a company whose priority topics are "GenAI, Cloud migration" must read as
+ * "here is where this prospect needs GenAI and cloud migration", not as a
  * generic company profile.
  */
 class AIEngine {
@@ -177,7 +178,12 @@ class AIEngine {
       .map(([label, body]) => `${label}: ${String(body).replace(/\s+/g, ' ').trim().slice(0, maxChars)}`);
 
     const monitoring = [
-      seller.relevantTopics?.length ? `Topics they monitor: ${this.list(seller.relevantTopics)}` : '',
+      seller.priorityTopics?.length
+        ? `Topics they monitor — HIGH PRIORITY: ${this.list(seller.priorityTopics)}`
+        : '',
+      seller.standardTopics?.length
+        ? `Topics they monitor — standard priority: ${this.list(seller.standardTopics)}`
+        : '',
       seller.relevantTechnologies?.length ? `Technologies they care about: ${this.list(seller.relevantTechnologies)}` : '',
       seller.relevantContactTitles?.length ? `Buying-committee titles they track: ${this.list(seller.relevantContactTitles)}` : '',
       seller.relevantHiringTitles?.length ? `Hiring titles they treat as a signal: ${this.list(seller.relevantHiringTitles)}` : '',
@@ -241,35 +247,46 @@ Rules for using this:
    * The block every prompt shares. Repeating the lens in each call is what keeps
    * a four-call report coherent instead of four unrelated essays.
    */
-  buildContext({ seller, profile, prospect, crm = null }) {
-    const keywords = (profile.keywords || []).filter(Boolean);
+  buildContext({ seller, prospect, crm = null }) {
+    const priority = (seller.priorityTopics || []).filter(Boolean);
+    const standard = (seller.standardTopics || []).filter(Boolean);
+    const focus = (seller.focusTerms || []).filter(Boolean);
 
     return `
-=== WHO IS SELLING (the reader of this report) ===
+=== WHO IS SELLING (the company this report is written for) ===
 Seller company: ${seller.name}${seller.industry ? ` (${seller.industry})` : ''}
+${seller.headquarters ? `Headquartered in: ${seller.headquarters}` : ''}
+${seller.website ? `Website: ${seller.website}` : ''}
+${seller.employeeBand ? `Size: ${seller.employeeBand}` : ''}
 What they do: ${seller.description || 'not specified'}
 Company capabilities they can deliver: ${this.list(seller.capabilities)}
 ${seller.capabilityNotes ? `Capability detail: ${seller.capabilityNotes}` : ''}
 Company value propositions: ${this.list(seller.valuePropositions)}
 Proof points / differentiators: ${this.list([...(seller.proofPoints || []), ...(seller.differentiators || [])])}
+Industries they sell into: ${this.list(seller.targetIndustries)}
+Departments they sell to: ${this.list(seller.targetDepartments)}
+Buyer roles they target: ${this.list(seller.targetRoles)}
 ${this.sellerNarrative(seller)}
-Sales rep: ${profile.name}${profile.jobTitle ? `, ${profile.jobTitle}` : ''}
-Vertical they sell into: ${profile.vertical || seller.industry || 'not specified'}
-Capabilities they sell in that vertical: ${this.list(profile.verticalCapabilities)}
-Departments/roles they target: ${this.list([...(profile.targetDepartments || []), ...(profile.targetRoles || [])])}
 
-=== PITCH FOCUS (THE PRIMARY LENS - THIS OVERRIDES EVERYTHING) ===
-Focus keywords: ${keywords.length ? keywords.join(', ') : 'general capability fit'}
-${keywords.length ? `
-The reader is pitching ${keywords.join(' and ')}. Write the ENTIRE report to answer:
-  "Where and why does ${prospect.name} need ${keywords.join(' / ')}, and how do we prove it?"
+=== REPORT FOCUS (THE PRIMARY LENS - THIS OVERRIDES EVERYTHING) ===
+${priority.length ? `HIGH-PRIORITY topics: ${priority.join(', ')}` : ''}
+${standard.length ? `Standard-priority topics: ${standard.join(', ')}` : ''}
+${focus.length ? `
+Write the ENTIRE report to answer:
+  "Where and why does ${prospect.name} need ${focus.join(' / ')}, and how do we prove it?"
 Rules:
-  - Every insight, opportunity, challenge and talking point must connect back to ${keywords.join(' or ')}
-    OR to a business condition that creates demand for them.
+  - Every insight, opportunity, challenge and talking point must connect back to ${focus.join(' or ')}
+    OR to a business condition that creates demand for them.${priority.length && standard.length ? `
+  - WEIGHTING IS NOT OPTIONAL. ${priority.join(', ')} ${priority.length === 1 ? 'is' : 'are'} high priority:
+    lead with ${priority.length === 1 ? 'it' : 'them'}, give ${priority.length === 1 ? 'it' : 'them'} the most items in every
+    section, and place ${priority.length === 1 ? 'it' : 'them'} first within each list. Treat ${standard.join(', ')}
+    as supporting context - include ${standard.length === 1 ? 'it' : 'them'} only where the evidence is genuinely strong,
+    and never at the expense of a high-priority topic.` : ''}
+  - Where the evidence supports it, tie claims to the technologies and buying-committee titles listed above.
   - Quantify with real figures from the sources whenever available.
-  - If a source shows ${prospect.name} already investing in ${keywords.join(' / ')}, say so explicitly and
-    describe the gap the reader can fill (scale, governance, production rollout, cost, compliance).
-  - Do NOT produce a generic company profile.` : ''}
+  - If a source shows ${prospect.name} already investing in ${focus.join(' / ')}, say so explicitly and
+    describe the gap the seller can fill (scale, governance, production rollout, cost, compliance).
+  - Do NOT produce a generic company profile.` : 'No topics or capabilities are configured — fall back to a general capability-fit read.'}
 
 === WHO IS BEING SOLD TO (the prospect) ===
 Company: ${prospect.name}${prospect.ticker ? ` (${prospect.ticker})` : ''}

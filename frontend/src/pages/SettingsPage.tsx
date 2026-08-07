@@ -1,33 +1,26 @@
 import React, { useState } from 'react';
-import { Building2, Code2, Plug, Save, Sparkles, Users } from 'lucide-react';
+import { Building2, Code2, KeyRound, Plug, Save, User as UserIcon, Users } from 'lucide-react';
 import { apiError, authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { Alert, Button, Card, Field, PageHeader, TagInput, cx } from '../components/ui';
+import { Alert, Button, Card, Field, PageHeader, cx } from '../components/ui';
 import ApiKeysPanel from '../components/ApiKeysPanel';
 import CompanyProfilePanel from '../components/CompanyProfilePanel';
 import IntegrationsPanel from '../components/IntegrationsPanel';
 import UsersPanel from '../components/UsersPanel';
-import {
-  DEPARTMENT_SUGGESTIONS,
-  KEYWORD_SUGGESTIONS,
-  ROLE_SUGGESTIONS,
-  VERTICALS,
-  capabilitySuggestionsFor,
-} from '../lib/taxonomy';
 
-type TabId = 'focus' | 'company' | 'users' | 'integrations' | 'api';
+type TabId = 'profile' | 'company' | 'users' | 'integrations' | 'api';
 
 export default function SettingsPage() {
   const { user, organization, setUser, setOrganization } = useAuthStore();
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
 
-  const [tab, setTab] = useState<TabId>('focus');
+  const [tab, setTab] = useState<TabId>('profile');
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
   // The API tab is admin-only: a key reads every report the company has ever
   // generated, so it is not something a member should see or create.
   const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
-    { id: 'focus', label: 'Your focus', icon: Sparkles },
+    { id: 'profile', label: 'Profile', icon: UserIcon },
     { id: 'company', label: 'Company profile', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
     // Admin-only: a CRM connection exposes the whole tenant's pipeline, and an
@@ -45,7 +38,7 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="Settings"
         title="Workspace settings"
-        description="What you sell and what you pitch — the two inputs every report is built from."
+        description="Your account, and the company profile every report is built from."
       />
 
       {message && (
@@ -74,14 +67,14 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {tab === 'focus' && (
-        <FocusPanel
+      {tab === 'profile' && (
+        <ProfilePanel
           user={user}
           onSaved={(updated) => {
             setUser(updated);
-            setMessage({ tone: 'success', text: 'Your focus is saved. New reports will use it.' });
+            setMessage({ tone: 'success', text: 'Your details are saved.' });
           }}
-          onError={(text) => setMessage({ tone: 'error', text })}
+          onMessage={setMessage}
         />
       )}
 
@@ -110,40 +103,42 @@ export default function SettingsPage() {
   );
 }
 
+
 // ---------------------------------------------------------------------------
-// My focus - the three answers that steer report generation
+// Profile - who this seat belongs to. Nothing here steers a report: what every
+// report focuses on comes from the Company profile tab.
 // ---------------------------------------------------------------------------
-function FocusPanel({
+function ProfilePanel({
   user,
   onSaved,
-  onError,
+  onMessage,
 }: {
   user: any;
   onSaved: (user: any) => void;
-  onError: (message: string) => void;
+  onMessage: (message: { tone: 'success' | 'error'; text: string }) => void;
 }) {
   const [form, setForm] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
-    jobTitle: user?.jobTitle || '',
-    vertical: user?.profile?.vertical || '',
-    verticalCapabilities: user?.profile?.verticalCapabilities || [],
-    keywords: user?.profile?.keywords || [],
-    targetDepartments: user?.profile?.targetDepartments || [],
-    targetRoles: user?.profile?.targetRoles || [],
-    region: user?.profile?.region || '',
   });
   const [saving, setSaving] = useState(false);
+
+  const dirty =
+    form.firstName !== (user?.firstName || '') || form.lastName !== (user?.lastName || '');
+  const valid = Boolean(form.firstName.trim() && form.lastName.trim());
 
   const set = (patch: Partial<typeof form>) => setForm((prev) => ({ ...prev, ...patch }));
 
   const save = async () => {
     setSaving(true);
     try {
-      const res = await authAPI.updateProfile(form as any);
+      const res = await authAPI.updateProfile({
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+      });
       onSaved(res.data.user);
     } catch (err) {
-      onError(apiError(err, 'Could not save your focus'));
+      onMessage({ tone: 'error', text: apiError(err, 'Could not save your details') });
     } finally {
       setSaving(false);
     }
@@ -152,119 +147,131 @@ function FocusPanel({
   return (
     <div className="space-y-5">
       <Card className="card-pad">
-        <h2 className="mb-1 text-base font-bold text-ink">Report targeting</h2>
-        <p className="mb-5 text-[13px] leading-relaxed text-ink-muted">
-          These three fields are the primary lens. A report for “GenAI solutions” argues where the
-          prospect needs GenAI — not a generic company profile.
-        </p>
+        <h2 className="mb-5 text-base font-bold text-ink">Your details</h2>
 
         <div className="space-y-5">
-          <Field
-            label="Vertical you sell into"
-            required
-            hint="The industry of your prospects, not your own company's."
-          >
-            <input
-              className="input"
-              list="settings-verticals"
-              placeholder="Banking & Financial Services"
-              value={form.vertical}
-              onChange={(e) => set({ vertical: e.target.value })}
-            />
-            <datalist id="settings-verticals">
-              {VERTICALS.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-          </Field>
-
-          <Field
-            label="What you look for in a prospect"
-            required
-            hint="The capabilities you sell into that vertical — the problems worth finding."
-          >
-            <TagInput
-              value={form.verticalCapabilities}
-              onChange={(verticalCapabilities) => set({ verticalCapabilities })}
-              placeholder="e.g. KYC/AML automation"
-              suggestions={capabilitySuggestionsFor(form.vertical)}
-            />
-          </Field>
-
-          <Field
-            label="What you are pitching"
-            required
-            hint="Your headline solutions. Every insight is connected back to these."
-          >
-            <TagInput
-              value={form.keywords}
-              onChange={(keywords) => set({ keywords })}
-              placeholder="e.g. GenAI solutions, Copilot solutions"
-              suggestions={KEYWORD_SUGGESTIONS}
-            />
-          </Field>
-
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Departments you target" hint="Used to score hiring signals.">
-              <TagInput
-                value={form.targetDepartments}
-                onChange={(targetDepartments) => set({ targetDepartments })}
-                placeholder="e.g. Technology / IT"
-                suggestions={DEPARTMENT_SUGGESTIONS}
+            <Field label="First name" required>
+              <input
+                className="input"
+                value={form.firstName}
+                onChange={(e) => set({ firstName: e.target.value })}
               />
             </Field>
-            <Field label="Buyer roles">
-              <TagInput
-                value={form.targetRoles}
-                onChange={(targetRoles) => set({ targetRoles })}
-                placeholder="e.g. CIO"
-                suggestions={ROLE_SUGGESTIONS}
+            <Field label="Last name" required>
+              <input
+                className="input"
+                value={form.lastName}
+                onChange={(e) => set({ lastName: e.target.value })}
               />
             </Field>
           </div>
+
+          {/* Read-only: the address decides which company this seat belongs to,
+              so changing it here would silently move someone between tenants. */}
+          <Field
+            label="Email"
+            hint="Your sign-in address. Ask an owner or admin if it needs to change."
+          >
+            <input className="input" value={user?.email || ''} disabled readOnly />
+          </Field>
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <Button icon={Save} loading={saving} disabled={!dirty || !valid} onClick={save}>
+            Save changes
+          </Button>
         </div>
       </Card>
 
-      <Card className="card-pad">
-        <h2 className="mb-5 text-base font-bold text-ink">Your details</h2>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="First name">
-            <input
-              className="input"
-              value={form.firstName}
-              onChange={(e) => set({ firstName: e.target.value })}
-            />
-          </Field>
-          <Field label="Last name">
-            <input
-              className="input"
-              value={form.lastName}
-              onChange={(e) => set({ lastName: e.target.value })}
-            />
-          </Field>
-          <Field label="Job title">
-            <input
-              className="input"
-              value={form.jobTitle}
-              onChange={(e) => set({ jobTitle: e.target.value })}
-            />
-          </Field>
-          <Field label="Region">
-            <input
-              className="input"
-              placeholder="EMEA"
-              value={form.region}
-              onChange={(e) => set({ region: e.target.value })}
-            />
-          </Field>
-        </div>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button icon={Save} loading={saving} onClick={save}>
-          Save changes
-        </Button>
-      </div>
+      <PasswordCard onMessage={onMessage} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Change password
+// ---------------------------------------------------------------------------
+function PasswordCard({
+  onMessage,
+}: {
+  onMessage: (message: { tone: 'success' | 'error'; text: string }) => void;
+}) {
+  const empty = { currentPassword: '', newPassword: '', confirmPassword: '' };
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+
+  const set = (patch: Partial<typeof form>) => setForm((prev) => ({ ...prev, ...patch }));
+
+  const mismatch = Boolean(form.confirmPassword) && form.newPassword !== form.confirmPassword;
+  const valid =
+    Boolean(form.currentPassword) && form.newPassword.length >= 8 && !mismatch && Boolean(form.confirmPassword);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!valid) return;
+
+    setSaving(true);
+    try {
+      await authAPI.changePassword(form.currentPassword, form.newPassword);
+      setForm(empty);
+      onMessage({ tone: 'success', text: 'Your password has been changed.' });
+    } catch (err) {
+      onMessage({ tone: 'error', text: apiError(err, 'Could not change your password') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="card-pad">
+      <h2 className="mb-1 text-base font-bold text-ink">Change password</h2>
+      <p className="mb-5 text-[13px] leading-relaxed text-ink-muted">
+        You stay signed in on this device after changing it.
+      </p>
+
+      <form onSubmit={submit} className="space-y-5">
+        <Field label="Current password" required>
+          <input
+            type="password"
+            className="input"
+            autoComplete="current-password"
+            value={form.currentPassword}
+            onChange={(e) => set({ currentPassword: e.target.value })}
+          />
+        </Field>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="New password" required hint="At least 8 characters.">
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={form.newPassword}
+              onChange={(e) => set({ newPassword: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Confirm new password"
+            required
+            error={mismatch ? 'Passwords do not match' : undefined}
+          >
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={form.confirmPassword}
+              onChange={(e) => set({ confirmPassword: e.target.value })}
+            />
+          </Field>
+        </div>
+
+        <div className="flex justify-end">
+          <Button type="submit" icon={KeyRound} loading={saving} disabled={!valid}>
+            Change password
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }

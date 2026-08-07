@@ -281,7 +281,8 @@ export default function ReportDetailPage() {
           </h1>
           <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
             Researching news, filings and hiring signals, then writing the analysis through your
-            pitch lens{context.keywords?.length ? `: ${context.keywords.join(', ')}` : ''}.
+            company profile
+            {context.priorityTopics?.length ? `: ${context.priorityTopics.join(', ')}` : ''}.
           </p>
 
           <div className="mx-auto mt-7 max-w-sm">
@@ -512,27 +513,44 @@ export default function ReportDetailPage() {
             </h3>
             <dl className="space-y-2.5 text-[13px]">
               {context.sellerName && <ContextRow label="Seller" value={context.sellerName} />}
-              {context.vertical && <ContextRow label="Vertical" value={context.vertical} />}
-              {context.keywords?.length ? (
+              {context.priorityTopics?.length ? (
                 <div className="flex gap-3">
-                  <dt className="w-24 shrink-0 font-semibold text-ink-faint">Pitch focus</dt>
+                  <dt className="w-24 shrink-0 font-semibold text-ink-faint">Priority topics</dt>
                   <dd className="flex flex-wrap gap-1.5">
-                    {context.keywords.map((k: string) => (
+                    {context.priorityTopics.map((topic: string) => (
                       <span
-                        key={k}
-                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                        key={topic}
+                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700"
                       >
-                        {k}
+                        {topic}
                       </span>
                     ))}
                   </dd>
                 </div>
               ) : null}
-              {context.verticalCapabilities?.length ? (
+              {context.topics?.length ? (
+                <div className="flex gap-3">
+                  <dt className="w-24 shrink-0 font-semibold text-ink-faint">Other topics</dt>
+                  <dd className="flex flex-wrap gap-1.5">
+                    {context.topics.map((topic: string) => (
+                      <span
+                        key={topic}
+                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                      >
+                        {topic}
+                      </span>
+                    ))}
+                  </dd>
+                </div>
+              ) : null}
+              {context.sellerCapabilities?.length ? (
                 <ContextRow
                   label="Capabilities"
-                  value={context.verticalCapabilities.join(', ')}
+                  value={context.sellerCapabilities.join(', ')}
                 />
+              ) : null}
+              {context.technologies?.length ? (
+                <ContextRow label="Technologies" value={context.technologies.join(', ')} />
               ) : null}
             </dl>
 

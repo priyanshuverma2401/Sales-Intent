@@ -66,12 +66,12 @@ export interface EmployeeSignupPayload {
   email: string;
   password: string;
   jobTitle?: string;
-  vertical: string;
-  verticalCapabilities: string[];
-  keywords: string[];
-  targetDepartments?: string[];
-  targetRoles?: string[];
-  region?: string;
+}
+
+/** The employee profile. Report targeting lives on the company profile. */
+export interface ProfileUpdatePayload {
+  firstName?: string;
+  lastName?: string;
 }
 
 export interface DemoRequestPayload {
@@ -94,7 +94,9 @@ export const authAPI = {
   login: (email: string, password: string) => API.post('/auth/login', { email, password }),
   requestDemo: (data: DemoRequestPayload) => API.post('/auth/demo-request', data),
   getMe: () => API.get('/auth/me'),
-  updateProfile: (data: Partial<EmployeeSignupPayload>) => API.patch('/auth/profile', data),
+  updateProfile: (data: ProfileUpdatePayload) => API.patch('/auth/profile', data),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    API.post('/auth/change-password', { currentPassword, newPassword }),
 };
 
 export interface NewMemberPayload {
@@ -165,7 +167,6 @@ export const companiesAPI = {
   addCompany: (payload: {
     name: string;
     ticker?: string;
-    keywords?: string[];
     notes?: string;
     generateReport?: boolean;
   }) => API.post('/companies', payload),
@@ -177,7 +178,7 @@ export const companiesAPI = {
 export const accountsAPI = {
   // Search runs server-side, like every other list in the API
   getAccounts: (params?: { q?: string }) => API.get('/accounts', { params }),
-  update: (companyId: string, data: { keywords?: string[]; notes?: string }) =>
+  update: (companyId: string, data: { notes?: string }) =>
     API.patch(`/accounts/${companyId}`, data),
 };
 
@@ -193,7 +194,7 @@ export const reportsAPI = {
   generate: (companyId: string) => API.post(`/reports/${companyId}`),
   // Filtering happens server-side so it covers the whole history, not just the
   // page the browser happens to be holding. Blank/`all` values are omitted.
-  getReports: (params?: { q?: string; author?: string; vertical?: string }) =>
+  getReports: (params?: { q?: string; author?: string; industry?: string }) =>
     API.get('/reports', { params }),
   getReportFilters: () => API.get('/reports/filters'),
   getReport: (id: string) => API.get(`/reports/${id}`),

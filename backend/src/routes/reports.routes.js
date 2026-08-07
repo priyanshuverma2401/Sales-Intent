@@ -69,18 +69,22 @@ function escapeRegex(value) {
 }
 
 // ---------------------------------------------------------------------------
-// Options for the report filters: who has written reports, and through which
-// verticals. Derived from the whole visible set, so the dropdowns stay complete
-// no matter how narrow the current filter is.
+// Options for the report filters: who has written reports, and for which
+// prospect industries. Derived from the whole visible set, so the dropdowns stay
+// complete no matter how narrow the current filter is.
+//
+// Industry is the prospect's own, not a seller-side lens: every report in a
+// tenant now shares one lens (the company profile), so filtering on that would
+// only ever return everything.
 // Declared before '/:id' so "filters" is never read as an id.
 // ---------------------------------------------------------------------------
 router.get('/filters', authenticate, async (req, res) => {
   try {
     const scope = visibleScope(req);
 
-    const [authorIds, verticals] = await Promise.all([
+    const [authorIds, industries] = await Promise.all([
       Report.distinct('userId', scope),
-      Report.distinct('context.vertical', scope),
+      Report.distinct('fastFacts.industry', scope),
     ]);
 
     const authors = await User.find({ _id: { $in: authorIds.filter(Boolean) } })
@@ -92,7 +96,7 @@ router.get('/filters', authenticate, async (req, res) => {
         _id: a._id,
         name: `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email,
       })),
-      verticals: verticals.filter(v => typeof v === 'string' && v.trim()).sort(),
+      industries: industries.filter(v => typeof v === 'string' && v.trim()).sort(),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -110,12 +114,12 @@ router.get('/filters', authenticate, async (req, res) => {
 // history instead of only the page that happens to be loaded.
 //   ?q=hsbc          company name, ticker or industry, case-insensitive
 //   ?author=<userId> who generated it
-//   ?vertical=<name> the lens it was written through
+//   ?industry=<name> the prospect's industry
 // ---------------------------------------------------------------------------
 router.get('/', authenticate, async (req, res) => {
   try {
     const scope = visibleScope(req);
-    const { q, author, vertical } = req.query;
+    const { q, author, industry } = req.query;
 
     // $and keeps the scope's own $or intact when the search adds a second one
     const conditions = [scope];
@@ -129,8 +133,8 @@ router.get('/', authenticate, async (req, res) => {
     if (author && author !== 'all' && mongoose.isValidObjectId(author)) {
       conditions.push({ userId: author });
     }
-    if (vertical && vertical !== 'all') {
-      conditions.push({ 'context.vertical': String(vertical) });
+    if (industry && industry !== 'all') {
+      conditions.push({ 'fastFacts.industry': String(industry) });
     }
 
     const filter = conditions.length > 1 ? { $and: conditions } : scope;

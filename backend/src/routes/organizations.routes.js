@@ -119,7 +119,7 @@ router.patch('/me', authenticate, authorize('owner', 'admin'), async (req, res) 
 // Users
 // ---------------------------------------------------------------------------
 
-const MEMBER_FIELDS = 'firstName lastName email jobTitle role profile preferences lastLogin createdAt';
+const MEMBER_FIELDS = 'firstName lastName email jobTitle role preferences lastLogin createdAt';
 
 // Who may act on whom. An admin runs the team but stops at their own tier: only
 // the owner can touch another admin, and nobody edits or removes the owner.
@@ -216,13 +216,8 @@ router.post('/members', authenticate, authorize('owner', 'admin'), async (req, r
       organizationId: org._id,
       company: org.name,
       role,
-      // The new seat inherits the org defaults; they set their own focus on
-      // first sign-in, which is what flips completedOnboarding.
-      profile: {
-        targetDepartments: org.targetDepartments || [],
-        targetRoles: org.targetRoles || [],
-        completedOnboarding: false,
-      },
+      // Nothing else to seed: the new seat reads every prospect through the
+      // company profile this tenant already maintains.
     });
 
     await member.save();

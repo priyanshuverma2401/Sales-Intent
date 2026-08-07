@@ -25,7 +25,7 @@ interface ReportSummary {
   progress?: { step?: string; percent?: number };
   error?: string;
   score?: { value?: number; band?: string; summary?: string };
-  context?: { keywords?: string[]; vertical?: string };
+  context?: { sellerName?: string; priorityTopics?: string[]; topics?: string[] };
   fastFacts?: { industry?: string; headquarters?: string };
   generatedAt: string;
   pdfFileName?: string;
@@ -46,7 +46,7 @@ export default function ReportsPage() {
 
   const [query, setQuery] = useState('');
   const [authorId, setAuthorId] = useState('all');
-  const [vertical, setVertical] = useState('all');
+  const [industry, setIndustry] = useState('all');
 
   // Typing must not fire a request per keystroke
   const [search, setSearch] = useState('');
@@ -59,17 +59,17 @@ export default function ReportsPage() {
   // page, so narrowing the list never removes the option you narrowed by.
   const [options, setOptions] = useState<{
     authors: { _id: string; name: string }[];
-    verticals: string[];
-  }>({ authors: [], verticals: [] });
+    industries: string[];
+  }>({ authors: [], industries: [] });
   const [total, setTotal] = useState(0);
 
   const loadOptions = useCallback(async () => {
     try {
       const res = await reportsAPI.getReportFilters();
-      setOptions({ authors: res.data.authors || [], verticals: res.data.verticals || [] });
+      setOptions({ authors: res.data.authors || [], industries: res.data.industries || [] });
     } catch (err) {
       // A missing filter list is not worth an error banner; the list still works
-      setOptions({ authors: [], verticals: [] });
+      setOptions({ authors: [], industries: [] });
     }
   }, []);
 
@@ -80,7 +80,7 @@ export default function ReportsPage() {
         const res = await reportsAPI.getReports({
           ...(search ? { q: search } : {}),
           ...(authorId !== 'all' ? { author: authorId } : {}),
-          ...(vertical !== 'all' ? { vertical } : {}),
+          ...(industry !== 'all' ? { industry } : {}),
         });
         setReports(res.data);
         setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
@@ -90,7 +90,7 @@ export default function ReportsPage() {
         setLoading(false);
       }
     },
-    [search, authorId, vertical]
+    [search, authorId, industry]
   );
 
   // Refetches whenever a filter changes, because `load` depends on all three
@@ -110,12 +110,12 @@ export default function ReportsPage() {
     return () => clearInterval(timer);
   }, [hasPending, load]);
 
-  const filtersActive = Boolean(query.trim()) || authorId !== 'all' || vertical !== 'all';
+  const filtersActive = Boolean(query.trim()) || authorId !== 'all' || industry !== 'all';
 
   const clearFilters = () => {
     setQuery('');
     setAuthorId('all');
-    setVertical('all');
+    setIndustry('all');
   };
 
   const download = async (report: ReportSummary) => {
@@ -139,7 +139,7 @@ export default function ReportsPage() {
       await reportsAPI.remove(report._id);
       setReports((prev) => prev.filter((r) => r._id !== report._id));
       setTotal((prev) => Math.max(0, prev - 1));
-      // That may have been the last report by an author or in a vertical
+      // That may have been the last report by an author or in an industry
       loadOptions();
     } catch (err) {
       setMessage({ tone: 'error', text: apiError(err, 'Could not delete the report') });
@@ -202,13 +202,13 @@ export default function ReportsPage() {
 
           <select
             className="input w-auto min-w-[170px]"
-            value={vertical}
-            onChange={(e) => setVertical(e.target.value)}
-            aria-label="Filter by vertical"
-            disabled={options.verticals.length === 0}
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            aria-label="Filter by industry"
+            disabled={options.industries.length === 0}
           >
-            <option value="all">All verticals</option>
-            {options.verticals.map((v) => (
+            <option value="all">All industries</option>
+            {options.industries.map((v) => (
               <option key={v} value={v}>
                 {v}
               </option>
@@ -287,10 +287,12 @@ export default function ReportsPage() {
                           .filter(Boolean)
                           .join(' · ') || 'Account brief'}
                       </p>
-                      {report.context?.vertical && (
+                      {report.context?.sellerName && (
                         <p className="mt-1.5 flex items-center gap-1.5 text-2xs text-ink-muted">
                           <Layers size={11} className="shrink-0 text-ink-faint" />
-                          <span className="truncate font-medium">{report.context.vertical}</span>
+                          <span className="truncate font-medium">
+                            Written for {report.context.sellerName}
+                          </span>
                         </p>
                       )}
                       {report.author && !report.isMine && (
@@ -309,17 +311,28 @@ export default function ReportsPage() {
                     )}
                   </div>
 
-                  {/* Lens */}
-                  {report.context?.keywords?.length ? (
+                  {/* Lens — high-priority topics lead, so they are shown first */}
+                  {report.context?.priorityTopics?.length || report.context?.topics?.length ? (
                     <div className="mt-3 flex flex-wrap gap-1.5">
-                      {report.context.keywords.slice(0, 3).map((k) => (
+                      {(report.context.priorityTopics || []).slice(0, 3).map((topic) => (
                         <span
-                          key={k}
-                          className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                          key={topic}
+                          title="High priority"
+                          className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700"
                         >
-                          {k}
+                          {topic}
                         </span>
                       ))}
+                      {(report.context.topics || [])
+                        .slice(0, Math.max(0, 3 - (report.context.priorityTopics?.length || 0)))
+                        .map((topic) => (
+                          <span
+                            key={topic}
+                            className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                          >
+                            {topic}
+                          </span>
+                        ))}
                     </div>
                   ) : null}
 

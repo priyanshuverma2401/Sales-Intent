@@ -16,7 +16,7 @@ import {
   Sparkles,
   Sun,
 } from 'lucide-react';
-import { useAuthStore, needsOnboarding } from '../store/authStore';
+import { useAuthStore, companyProfileIncomplete, focusTopics } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { inboxAPI } from '../services/api';
 import { Logo, cx } from './ui';
@@ -116,8 +116,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
-  const keywords = user?.profile?.keywords || [];
-  const showOnboardingBanner = needsOnboarding(user) && location.pathname !== '/settings';
+  const { high: priorityTopics, all: allTopics } = focusTopics(organization);
+  // Only an owner or admin can fill the company profile in, so a member is told
+  // who to ask rather than sent to a form they cannot edit.
+  const isAdmin = user?.role === 'owner' || user?.role === 'admin';
+  const showProfileBanner = companyProfileIncomplete(organization) && location.pathname !== '/settings';
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -173,27 +176,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Pitch lens - always visible so the rep knows what reports will focus on */}
+        {/* The company's monitored topics - what every report is written around.
+            High-priority ones lead, because those are the ones that steer it. */}
         {!collapsed && (
           <div className="mx-3 mb-3 rounded-lg border border-navy-700 bg-navy-800/60 p-3">
             <div className="mb-2 flex items-center gap-1.5 text-2xs font-bold uppercase tracking-wider text-brand-300">
-              <Sparkles size={12} /> Pitch focus
+              <Sparkles size={12} /> Report focus
             </div>
-            {keywords.length ? (
+            {allTopics.length ? (
               <div className="flex flex-wrap gap-1">
-                {keywords.slice(0, 4).map((k) => (
-                  <span
-                    key={k}
-                    className="rounded bg-brand-500/15 px-1.5 py-0.5 text-2xs font-medium text-brand-100"
-                  >
-                    {k}
-                  </span>
-                ))}
+                {allTopics.slice(0, 4).map((topic) => {
+                  const priority = priorityTopics.includes(topic);
+                  return (
+                    <span
+                      key={topic}
+                      title={priority ? 'High priority' : undefined}
+                      className={cx(
+                        'rounded px-1.5 py-0.5 text-2xs font-medium',
+                        priority
+                          ? 'bg-emerald-500/20 text-emerald-200'
+                          : 'bg-brand-500/15 text-brand-100'
+                      )}
+                    >
+                      {topic}
+                    </span>
+                  );
+                })}
               </div>
-            ) : (
+            ) : isAdmin ? (
               <Link to="/settings" className="text-2xs font-medium text-amber-300 hover:underline">
-                Not set — add your keywords
+                Not set — add relevant topics
               </Link>
+            ) : (
+              <p className="text-2xs font-medium text-amber-300">
+                Not set — ask your admin to add relevant topics
+              </p>
             )}
           </div>
         )}
@@ -225,7 +242,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {organization?.name || user?.company}
               </p>
               <p className="truncate text-2xs text-ink-faint">
-                {user?.profile?.vertical || 'Sales intelligence workspace'}
+                {organization?.industry || 'Sales intelligence workspace'}
               </p>
             </div>
           </div>
@@ -277,7 +294,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     to="/settings"
                     className="mt-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-soft transition hover:bg-slate-50"
                   >
-                    <Settings size={15} /> Settings & focus
+                    <Settings size={15} /> Settings
                   </Link>
                   <button
                     onClick={() => {
@@ -295,20 +312,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
-          {showOnboardingBanner && (
+          {showProfileBanner && (
             <div className="no-print border-b border-amber-200 bg-amber-50 px-6 py-3">
               <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 <AlertCircle size={16} className="shrink-0 text-amber-600" />
-                <span className="font-semibold text-amber-900">Finish your setup</span>
+                <span className="font-semibold text-amber-900">Company profile is empty</span>
                 <span className="text-amber-800">
-                  Add your vertical, capabilities and pitch keywords so reports know what to look for.
+                  {isAdmin
+                    ? 'Add your capabilities and relevant topics so reports know what to look for.'
+                    : 'Ask an owner or admin to add your capabilities and relevant topics — reports need them.'}
                 </span>
-                <Link
-                  to="/settings"
-                  className="font-semibold text-amber-900 underline underline-offset-2"
-                >
-                  Complete now
-                </Link>
+                {isAdmin && (
+                  <Link
+                    to="/settings"
+                    className="font-semibold text-amber-900 underline underline-offset-2"
+                  >
+                    Complete now
+                  </Link>
+                )}
               </div>
             </div>
           )}
