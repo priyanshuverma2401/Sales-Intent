@@ -362,7 +362,8 @@ Each talking point is an object with exactly these keys:
 Rules:
 - Enough detail that the rep can recall the whole point from a glance mid-meeting. Never a single sentence.
 - Do not restate a Key Insight verbatim - a talking point is the spoken version with the ask attached.
-- Each one opens a different door: no two may lead to the same question.`;
+- Each one opens a different door: no two may lead to the same question.
+- The first talking points belong to the high-priority topics named in the REPORT FOCUS above.`;
   }
 
   // ---- report sections ---------------------------------------------------
@@ -378,7 +379,7 @@ ${this.buildSources(sources)}
 Produce the "What You Need To Know" brief. Return JSON with exactly these keys:
 
 {
-  "keyInsights":     [7 items],   // the most important, decision-relevant developments, each tied to the pitch focus
+  "keyInsights":     [7 items],   // the most important, decision-relevant developments, each tied to the report focus
   "opportunities":   [5 items],   // specific engagements the SELLER can pitch, naming the seller capability used and the outcome it buys
   "challenges":      [4 items],   // problems/risks the prospect faces that the seller's capabilities address, with the cost of leaving them unsolved
   "peopleUpdates":   [3 items],   // leadership moves, hiring patterns and what they signal about budget/ownership
@@ -405,7 +406,7 @@ Produce the "Research & Analysis / Insights" section. Return JSON with exactly t
 {
   "companyOverview":   [3 items],  // what the company is and how it makes money today
   "keyPeopleChanges":  [3 items],  // named executives, their remit, and what their arrival/exit changes
-  "keyProjects":       [4 items],  // live programmes, pilots and platform builds - prioritise ones touching the pitch focus
+  "keyProjects":       [4 items],  // live programmes, pilots and platform builds - prioritise ones touching the report focus
   "aspirations":       [3 items],  // stated ambitions in the company's own framing
   "businessGoals":     [3 items],  // measurable targets: growth, cost, margin, market share, with numbers where known
   "macroPerspective":  [3 items],  // market, rate, regulatory and competitive conditions shaping their decisions
@@ -437,7 +438,7 @@ Produce the "Business Model / Strategic Initiatives / Financials / SWOT" section
   "swot": {
     "strengths":     [3 items],  // strengths FROM THE SELLER'S ANGLE: why this prospect can buy and absorb what we sell
     "weaknesses":    [2 items],  // gaps and constraints that would slow or block a deal
-    "opportunities": [4 items],  // where the seller's capabilities and the pitch focus create value for the prospect
+    "opportunities": [4 items],  // where the seller's capabilities and the report focus create value for the prospect
     "threats":       [2 items]   // external risks to the engagement: regulation, macro, competing vendors
   }
 }
