@@ -3,40 +3,38 @@ const fs = require('fs');
 const path = require('path');
 
 // ---------------------------------------------------------------------------
-// Design tokens - kept in one place so the PDF and the web report stay in step
+// Design tokens.
+//
+// The layout follows the Salesmotion insights deck: A4 landscape, one
+// full-width column read straight down the page, generous line spacing, an
+// outline icon in front of every claim, and almost no chrome - a quiet running
+// header, a single footer rule, nothing boxed that does not need a box.
 // ---------------------------------------------------------------------------
 const PAGE = { width: 841.89, height: 595.28 }; // A4 landscape
-const MARGIN = 46;
+
+const MARGIN = 50;
 const CONTENT_WIDTH = PAGE.width - MARGIN * 2;
 
-// The page is 750pt wide. Set as one measure that is ~150 characters a line,
-// which is roughly twice what anyone reads comfortably, so the body runs in two
-// columns instead. Every block below flows through the column machinery.
-const COLUMNS = 2;
-const GUTTER = 34;
-const COL_WIDTH = (CONTENT_WIDTH - GUTTER * (COLUMNS - 1)) / COLUMNS;
-
-const HEADER_RULE_Y = 62;
-const BODY_TOP = 86;
+const HEADER_Y = 36;
+const BODY_TOP = 80;
 const FOOTER_RULE_Y = PAGE.height - 56;
-const BODY_BOTTOM = FOOTER_RULE_Y - 20;
-const COLUMN_HEIGHT = BODY_BOTTOM - BODY_TOP;
+const BODY_BOTTOM = FOOTER_RULE_Y - 18;
+const PAGE_CAP = BODY_BOTTOM - BODY_TOP;
 
 const C = {
-  page: '#f7f9fc',
-  surface: '#ffffff',
-  ink: '#0b1b34',
-  body: '#334155',
-  muted: '#8494ab',
-  line: '#e3e9f2',
-  track: '#dde5f0',
-  brand: '#1d4ed8',
+  page: '#f8fafc',
+  ink: '#212b36',       // headings
+  body: '#3b4757',      // running copy
+  muted: '#98a1ac',     // header, footer, bylines
+  line: '#e5e9ee',
+  card: '#f1f3f6',      // quote cards
+  track: '#e2e7ee',     // score bar track
+  blue: '#2779c8',      // icons, links, citation chips, blue subheads
+  brand: '#1d4ed8',     // wordmark
   brandDark: '#0f2f6b',
-  brandSoft: '#eef3fd',
-  link: '#2563eb',
-  amber: '#d97706',
-  green: '#059669',
-  red: '#dc2626',
+  amber: '#e8a33d',
+  green: '#1f9d61',
+  red: '#d9534f',
   purple: '#7c3aed',
   teal: '#0e7490',
   white: '#ffffff',
@@ -48,9 +46,9 @@ const F = {
   italic: 'Helvetica-Oblique',
 };
 
-// Body copy is set once here so every block shares the same vertical rhythm
-const BODY_SIZE = 9.4;
-const BODY_GAP = 2.8;
+// One body setting shared everywhere keeps the vertical rhythm even
+const BODY_SIZE = 9.5;
+const BODY_GAP = 3.2;
 
 // Only the symbols WinAnsi - the encoding pdfkit's core fonts use - can render.
 // Anything else falls back to the ISO code, which is legible in every font.
@@ -112,33 +110,18 @@ class ReportGenerator {
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    // ctx carries the running header label plus the column cursor, so chrome can
-    // be redrawn and the flow restarted whenever a page is added
     const ctx = {
       group: '',
-      groupIndex: 0,
       company: report.companyName,
       date: this.formatDate(report.generatedAt || new Date()),
       firstPage: true,
-      col: 0,
-      colTop: BODY_TOP,
-      // The topic a spilling column is carrying on from, so it can be named
-      section: null,
-      subsection: null,
       toc: [],
       tocPageIndex: null,
     };
 
-    // Blocks are measured and split before they are drawn, so pdfkit should
-    // never need to break a page by itself. If it ever does - a single
-    // unbreakable word taller than a column, say - this hook keeps the page
-    // furnished and drops the cursor back into the first column rather than
-    // leaving the flow writing into the footer.
-    doc.on('pageAdded', () => {
-      this.drawChrome(doc, ctx);
-      ctx.col = 0;
-      ctx.colTop = BODY_TOP;
-    });
+    // A paragraph longer than the remaining space makes pdfkit add a page by
+    // itself; this hook keeps that page furnished and lets the text carry on
+    doc.on('pageAdded', () => this.drawChrome(doc, ctx));
 
     this.coverPage(doc, ctx, report, meta);
     this.contentsPlaceholder(doc, ctx);
@@ -156,8 +139,8 @@ class ReportGenerator {
     this.sourcesPage(doc, ctx, report);
     this.reportContextSection(doc, ctx, report, meta);
 
-    // Both passes reach back into pages that were written earlier, so they have
-    // to run while the buffer is still open
+    // Both passes reach back into earlier pages, so they run before the
+    // buffer closes
     this.drawContents(doc, ctx);
     this.stampPageNumbers(doc, ctx);
 
@@ -173,15 +156,6 @@ class ReportGenerator {
   // Page chrome
   // =========================================================================
 
-  /**
-   * Draws background, header and footer for the current page.
-   *
-   * The footer sits below the bottom margin, and pdfkit breaks to a new page
-   * for any text past that line - which would recurse through `pageAdded`
-   * forever. Dropping the margins for the duration keeps the chrome outside
-   * that machinery, and the cursor is restored so an interrupted paragraph
-   * carries on where it left off.
-   */
   drawChrome(doc, ctx) {
     this.withoutMargins(doc, () => {
       this.paintBackground(doc);
@@ -190,6 +164,13 @@ class ReportGenerator {
     });
   }
 
+  /**
+   * The footer sits below the bottom margin, and pdfkit breaks to a new page
+   * for any text past that line - which would recurse through `pageAdded`
+   * forever. Dropping the margins for the duration keeps the chrome outside
+   * that machinery, and the cursor is restored so an interrupted paragraph
+   * carries on where it left off.
+   */
   withoutMargins(doc, render) {
     const { x, y } = doc;
     const margins = doc.page.margins;
@@ -212,25 +193,18 @@ class ReportGenerator {
     doc.restore();
   }
 
+  // Quiet, unruled, like the sample deck: group left, company right
   drawHeader(doc, ctx) {
     if (!ctx.group) return;
 
     doc.save();
-    doc.font(F.bold).fontSize(7.5).fillColor(C.brand)
-      .text(ctx.group.toUpperCase(), MARGIN, 42, {
-        width: CONTENT_WIDTH / 2,
-        characterSpacing: 1.1,
-        lineBreak: false,
-      });
-    doc.font(F.regular).fontSize(8.5).fillColor(C.muted)
-      .text(ctx.company, MARGIN + CONTENT_WIDTH / 2, 41.5, {
-        width: CONTENT_WIDTH / 2,
-        align: 'right',
-        lineBreak: false,
-      });
-
-    doc.moveTo(MARGIN, HEADER_RULE_Y).lineTo(PAGE.width - MARGIN, HEADER_RULE_Y)
-      .lineWidth(0.75).strokeColor(C.line).stroke();
+    doc.font(F.regular).fontSize(9).fillColor(C.muted);
+    doc.text(ctx.group, MARGIN, HEADER_Y, { width: CONTENT_WIDTH / 2, lineBreak: false });
+    doc.text(ctx.company, MARGIN + CONTENT_WIDTH / 2, HEADER_Y, {
+      width: CONTENT_WIDTH / 2,
+      align: 'right',
+      lineBreak: false,
+    });
     doc.restore();
   }
 
@@ -251,7 +225,7 @@ class ReportGenerator {
     doc.circle(dotX + 7.5, baseY + 4, 5).fillOpacity(0.85).fill(C.brand);
     doc.fillOpacity(1);
 
-    doc.font(F.regular).fontSize(8).fillColor(C.muted);
+    doc.font(F.regular).fontSize(8.5).fillColor(C.muted);
     doc.text(ctx.date, PAGE.width - MARGIN - 240, baseY + 2, {
       width: 240,
       align: 'right',
@@ -261,7 +235,7 @@ class ReportGenerator {
   }
 
   // Page numbers need the total, which is only known once the last page exists
-  stampPageNumbers(doc, ctx) {
+  stampPageNumbers(doc) {
     const range = doc.bufferedPageRange();
     const total = range.start + range.count;
 
@@ -286,12 +260,8 @@ class ReportGenerator {
   }
 
   // =========================================================================
-  // Column flow
+  // Flow helpers
   // =========================================================================
-
-  colX(ctx) {
-    return MARGIN + ctx.col * (COL_WIDTH + GUTTER);
-  }
 
   newPage(doc, ctx) {
     if (ctx.firstPage) {
@@ -299,140 +269,56 @@ class ReportGenerator {
       ctx.firstPage = false;
       this.drawChrome(doc, ctx);
     } else {
-      doc.addPage(); // the pageAdded hook draws the chrome and resets the column
+      doc.addPage(); // the pageAdded hook draws the chrome
     }
 
-    ctx.col = 0;
-    ctx.colTop = BODY_TOP;
     doc.x = MARGIN;
     doc.y = BODY_TOP;
-    this.continuationLabel(doc, ctx);
-  }
-
-  nextColumn(doc, ctx) {
-    if (ctx.col < COLUMNS - 1) {
-      ctx.col += 1;
-      doc.x = this.colX(ctx);
-      doc.y = ctx.colTop;
-      this.continuationLabel(doc, ctx);
-    } else {
-      this.newPage(doc, ctx);
-    }
-  }
-
-  /**
-   * Names the topic a column is carrying on from.
-   *
-   * Two columns read down-then-across, so copy that spills out of the left
-   * column reappears at the top of the right one with the *next* topic's
-   * heading sitting under it - which reads as though it belongs there. The
-   * label says whose words these are before the reader guesses.
-   *
-   * `ctx.section` is cleared by `h1` before it looks for room, so a column
-   * opened to make space for a new heading is not labelled with the old one.
-   */
-  continuationLabel(doc, ctx) {
-    if (!ctx.section) return;
-
-    const trail = [ctx.section, ctx.subsection].filter(Boolean).join('  ·  ');
-
-    doc.font(F.bold).fontSize(7).fillColor(C.muted)
-      .text(`${trail}  ·  CONTINUED`.toUpperCase(), this.colX(ctx), doc.y, {
-        width: COL_WIDTH,
-        characterSpacing: 0.8,
-        lineBreak: false,
-      });
-
-    doc.y += 15;
   }
 
   room(doc) {
     return BODY_BOTTOM - doc.y;
   }
 
-  // Usable height of a fresh column starting where this one does. Mid-topic it
-  // is shorter, because the next column opens with a "continued" label.
-  columnHeight(ctx) {
-    return BODY_BOTTOM - ctx.colTop - (ctx.section ? 15 : 0);
+  atTop(doc) {
+    return doc.y <= BODY_TOP + 0.5;
   }
 
-  // Break to the next column when the block will not fit in what is left
-  need(doc, ctx, height) {
+  // Break when the next block will not fit in what is left of the page
+  ensure(doc, ctx, height) {
     if (height > this.room(doc)) {
-      this.nextColumn(doc, ctx);
+      this.newPage(doc, ctx);
       return true;
     }
     return false;
   }
 
   /**
-   * Places a block of known height without cutting it in half.
-   *
-   * A bullet that would be split across two columns is moved whole to the next
-   * one instead. Only copy too tall for any column is split, and then only if
-   * enough of it can start here to be worth reading.
+   * Places a block of known height without cutting it in half: one that would
+   * straddle the fold moves whole to the next page. Only copy too tall for any
+   * page is allowed to split, and then only with a few lines already placed.
    */
   fitBlock(doc, ctx, height, minLines = 3) {
     if (height <= this.room(doc)) return;
 
-    if (height <= this.columnHeight(ctx)) {
-      this.nextColumn(doc, ctx);
+    if (height <= PAGE_CAP) {
+      this.newPage(doc, ctx);
       return;
     }
 
     const line = this.lineHeight(doc, BODY_SIZE);
-    if (this.room(doc) < line * minLines) this.nextColumn(doc, ctx);
+    if (this.room(doc) < line * minLines) this.newPage(doc, ctx);
   }
 
   space(doc, amount) {
     doc.y += amount;
   }
 
-  atColumnTop(doc, ctx) {
-    return doc.y <= ctx.colTop + 0.5;
-  }
-
   startGroup(doc, ctx, label) {
     ctx.group = label;
-    ctx.groupIndex += 1;
-    ctx.section = null;
-    ctx.subsection = null;
     this.newPage(doc, ctx);
     ctx.toc.push({ level: 0, label, page: this.pageNumber(doc) });
-    this.groupBanner(doc, ctx, label);
   }
-
-  // Full-width title strip above the columns on the first page of a group
-  groupBanner(doc, ctx, label) {
-    doc.font(F.bold).fontSize(7.5).fillColor(C.brand)
-      .text(`PART ${ctx.groupIndex}`, MARGIN, BODY_TOP - 4, {
-        width: CONTENT_WIDTH,
-        characterSpacing: 1.4,
-      });
-    doc.font(F.bold).fontSize(22).fillColor(C.ink)
-      .text(label, MARGIN, doc.y + 3, { width: CONTENT_WIDTH });
-
-    const ruleY = doc.y + 12;
-    doc.save()
-      .moveTo(MARGIN, ruleY).lineTo(PAGE.width - MARGIN, ruleY)
-      .lineWidth(0.75).strokeColor(C.line).stroke()
-      .restore();
-
-    // Every column on this page starts below the strip; a later page resets to
-    // BODY_TOP through the pageAdded hook
-    ctx.col = 0;
-    ctx.colTop = ruleY + 18;
-    doc.x = MARGIN;
-    doc.y = ctx.colTop;
-  }
-
-  // =========================================================================
-  // Text flow
-  //
-  // Long copy is split across columns here rather than left to pdfkit, which
-  // only knows about pages. Everything is measured first, so a block never runs
-  // past the bottom of its column.
-  // =========================================================================
 
   lineHeight(doc, size, lineGap = BODY_GAP) {
     doc.fontSize(size);
@@ -440,148 +326,9 @@ class ReportGenerator {
   }
 
   /**
-   * Largest word boundary at which `text` still fits in `avail`.
-   * Prefix height grows monotonically with length, so this bisects.
+   * Wrapped height of a text block, citation chips included, so callers can
+   * decide where it goes before anything is drawn.
    */
-  splitIndex(doc, text, width, lineGap, avail) {
-    const bounds = [];
-    const spaces = /\s+/g;
-    let match;
-    while ((match = spaces.exec(text)) !== null) bounds.push(match.index);
-    if (!bounds.length) return -1;
-
-    let lo = 0;
-    let hi = bounds.length - 1;
-    let best = -1;
-
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const height = doc.heightOfString(text.slice(0, bounds[mid]), { width, lineGap });
-      if (height <= avail) {
-        best = bounds[mid];
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-
-    return best;
-  }
-
-  /**
-   * Writes wrapped copy at the column cursor, spilling into the next column
-   * when it runs out of room. Citation chips are appended to the final line.
-   */
-  flow(doc, ctx, text, options = {}) {
-    const {
-      font = F.regular,
-      size = BODY_SIZE,
-      color = C.body,
-      lineGap = BODY_GAP,
-      indent = 0,
-      characterSpacing = 0,
-      align = 'left',
-      link,
-      citations = [],
-      // Set when the caller has already drawn something at this cursor - a
-      // bullet marker, a reference number - that the first line must stay with
-      anchored = false,
-    } = options;
-
-    const value = String(text || '').trim();
-    if (!value) return;
-
-    const width = COL_WIDTH - indent;
-    const setFont = () => doc.font(font).fontSize(size);
-
-    setFont();
-    const line = this.lineHeight(doc, size, lineGap);
-    // The chips wrap onto their own line in the worst case, so the last chunk
-    // keeps a line in hand for them
-    const tail = citations.length ? line : 0;
-
-    // Unanchored copy can still be moved whole; anchored copy was placed by its
-    // caller, which measured it first
-    if (!anchored) {
-      setFont();
-      this.fitBlock(doc, ctx, doc.heightOfString(value, { width, lineGap }) + tail);
-    }
-
-    let rest = value;
-    let first = true;
-    let guard = 0;
-
-    while (rest && guard++ < 400) {
-      setFont();
-
-      // A block that cannot show at least two lines reads as an orphan
-      if (!(anchored && first) && this.room(doc) < line * 2 && !this.atColumnTop(doc, ctx)) {
-        this.nextColumn(doc, ctx);
-        continue;
-      }
-
-      const x = this.colX(ctx) + indent;
-      const avail = this.room(doc);
-      const height = doc.heightOfString(rest, { width, lineGap });
-
-      if (height <= avail - tail) {
-        doc.fillColor(color).text(rest, x, doc.y, {
-          width,
-          lineGap,
-          align,
-          characterSpacing,
-          link,
-          continued: citations.length > 0,
-        });
-
-        if (citations.length) {
-          doc.font(F.bold).fontSize(6.8).fillColor(C.link)
-            .text(`  ${citations.map(n => `[${n}]`).join(' ')}`, {
-              lineGap,
-              characterSpacing: 0,
-            });
-        }
-        return;
-      }
-
-      const cut = this.splitIndex(doc, rest, width, lineGap, avail);
-
-      if (cut <= 0) {
-        if (!this.atColumnTop(doc, ctx)) {
-          // Not even one line fits at this cursor - take a fresh column
-          this.nextColumn(doc, ctx);
-          continue;
-        }
-
-        // A whole empty column is not enough: an unbroken run longer than the
-        // column, a single 400-character URL. Nothing can be gained by moving
-        // it again, so it is handed to pdfkit whole rather than looped on.
-        doc.fillColor(color).text(rest, x, doc.y, {
-          width,
-          lineGap,
-          align,
-          characterSpacing,
-          link,
-        });
-        return;
-      }
-
-      doc.fillColor(color).text(rest.slice(0, cut), x, doc.y, {
-        width,
-        lineGap,
-        align,
-        characterSpacing,
-        link,
-      });
-
-      rest = rest.slice(cut).replace(/^\s+/, '');
-      first = false;
-      this.nextColumn(doc, ctx);
-    }
-  }
-
-  // Height `flow` will occupy, so a caller can place the block before drawing
-  // any marker that has to travel with it
   flowHeight(doc, text, options = {}) {
     const {
       font = F.regular,
@@ -595,13 +342,355 @@ class ReportGenerator {
     if (!value) return 0;
 
     doc.font(font).fontSize(size);
-    const height = doc.heightOfString(value, { width: COL_WIDTH - indent, lineGap });
+    const height = doc.heightOfString(value, { width: CONTENT_WIDTH - indent, lineGap });
 
-    return height + (citations.length ? this.lineHeight(doc, size, lineGap) : 0);
+    // Chips ride on the last line but can wrap onto one of their own
+    return height + (citations.length ? this.lineHeight(doc, size, lineGap) * 0.4 : 0);
+  }
+
+  // Body text at the cursor; pdfkit wraps it and, for copy taller than the
+  // page, breaks it - the pageAdded hook keeps those pages furnished
+  writeText(doc, text, options = {}) {
+    const {
+      font = F.regular,
+      size = BODY_SIZE,
+      color = C.body,
+      lineGap = BODY_GAP,
+      indent = 0,
+      link,
+      citations = [],
+    } = options;
+
+    const value = String(text || '').trim();
+    if (!value) return;
+
+    // Chips ride the last line via `continued` - except on copy taller than a
+    // page, where pdfkit's own break garbles the continued run; there the
+    // chips take a line of their own instead
+    doc.font(font).fontSize(size);
+    const tooTall = doc.heightOfString(value, { width: CONTENT_WIDTH - indent, lineGap }) > PAGE_CAP;
+    const inline = citations.length > 0 && !tooTall;
+
+    doc.fillColor(color)
+      .text(value, MARGIN + indent, doc.y, {
+        width: CONTENT_WIDTH - indent,
+        lineGap,
+        link,
+        continued: inline,
+      });
+
+    if (citations.length) {
+      const chips = citations.map(n => `[${n}]`).join('  ');
+      doc.font(F.bold).fontSize(7.2).fillColor(C.blue);
+      if (inline) {
+        doc.text(`  ${chips}`, { lineGap });
+      } else {
+        doc.text(chips, MARGIN + indent, doc.y + 2, { width: CONTENT_WIDTH - indent });
+      }
+    }
   }
 
   // =========================================================================
-  // Typography helpers
+  // Icons
+  //
+  // The deck this design follows sets a small outline icon in front of every
+  // claim. Core PDF fonts carry no icon glyphs, so these are drawn as paths.
+  // =========================================================================
+
+  drawIcon(doc, name, x, y, s, color) {
+    doc.save();
+    doc.lineWidth(Math.max(0.9, s * 0.09)).strokeColor(color).fillColor(color);
+    doc.lineJoin('round').lineCap('round');
+
+    const cx = x + s / 2;
+
+    switch (name) {
+      case 'bulb':
+        doc.circle(cx, y + s * 0.34, s * 0.28).stroke();
+        doc.moveTo(cx - s * 0.11, y + s * 0.62).lineTo(cx - s * 0.11, y + s * 0.8)
+          .moveTo(cx + s * 0.11, y + s * 0.62).lineTo(cx + s * 0.11, y + s * 0.8)
+          .moveTo(cx - s * 0.14, y + s * 0.9).lineTo(cx + s * 0.14, y + s * 0.9)
+          .stroke();
+        break;
+
+      case 'case':
+        doc.roundedRect(x + s * 0.06, y + s * 0.3, s * 0.88, s * 0.58, s * 0.1).stroke();
+        doc.roundedRect(x + s * 0.33, y + s * 0.1, s * 0.34, s * 0.2, s * 0.06).stroke();
+        doc.moveTo(x + s * 0.06, y + s * 0.55).lineTo(x + s * 0.94, y + s * 0.55).stroke();
+        break;
+
+      case 'person':
+        doc.circle(cx, y + s * 0.26, s * 0.17).stroke();
+        doc.path(
+          `M ${x + s * 0.16} ${y + s * 0.88} C ${x + s * 0.16} ${y + s * 0.52} ` +
+          `${x + s * 0.84} ${y + s * 0.52} ${x + s * 0.84} ${y + s * 0.88}`
+        ).stroke();
+        break;
+
+      case 'news':
+        doc.roundedRect(x + s * 0.08, y + s * 0.08, s * 0.84, s * 0.84, s * 0.08).stroke();
+        doc.moveTo(x + s * 0.26, y + s * 0.32).lineTo(x + s * 0.74, y + s * 0.32)
+          .moveTo(x + s * 0.26, y + s * 0.52).lineTo(x + s * 0.74, y + s * 0.52)
+          .moveTo(x + s * 0.26, y + s * 0.72).lineTo(x + s * 0.54, y + s * 0.72)
+          .stroke();
+        break;
+
+      case 'chat':
+        doc.roundedRect(x + s * 0.06, y + s * 0.1, s * 0.88, s * 0.6, s * 0.16).stroke();
+        doc.path(
+          `M ${x + s * 0.3} ${y + s * 0.7} L ${x + s * 0.24} ${y + s * 0.92} ` +
+          `L ${x + s * 0.5} ${y + s * 0.7}`
+        ).stroke();
+        break;
+
+      case 'clock':
+        doc.circle(cx, y + s * 0.5, s * 0.4).stroke();
+        doc.moveTo(cx, y + s * 0.28).lineTo(cx, y + s * 0.52).lineTo(cx + s * 0.18, y + s * 0.62).stroke();
+        break;
+
+      case 'refresh':
+        doc.path(
+          `M ${x + s * 0.86} ${y + s * 0.5} A ${s * 0.36} ${s * 0.36} 0 1 1 ${cx} ${y + s * 0.14}`
+        ).stroke();
+        doc.path(
+          `M ${cx - s * 0.02} ${y + s * 0.02} L ${cx + s * 0.16} ${y + s * 0.14} ` +
+          `L ${cx - s * 0.02} ${y + s * 0.26} Z`
+        ).fill();
+        break;
+
+      case 'arrow':
+        doc.moveTo(x + s * 0.1, y + s * 0.5).lineTo(x + s * 0.82, y + s * 0.5).stroke();
+        doc.path(
+          `M ${x + s * 0.6} ${y + s * 0.26} L ${x + s * 0.88} ${y + s * 0.5} ` +
+          `L ${x + s * 0.6} ${y + s * 0.74}`
+        ).stroke();
+        break;
+
+      case 'diamond':
+        doc.path(
+          `M ${cx} ${y + s * 0.06} L ${x + s * 0.92} ${y + s * 0.5} L ${cx} ${y + s * 0.94} ` +
+          `L ${x + s * 0.08} ${y + s * 0.5} Z`
+        ).stroke();
+        break;
+
+      case 'question':
+        doc.circle(cx, y + s * 0.5, s * 0.42).stroke();
+        doc.font(F.bold).fontSize(s * 0.62)
+          .text('?', x, y + s * 0.2, { width: s, align: 'center', lineBreak: false });
+        break;
+
+      case 'eye':
+        doc.ellipse(cx, y + s * 0.5, s * 0.44, s * 0.28).stroke();
+        doc.circle(cx, y + s * 0.5, s * 0.12).fill();
+        break;
+
+      case 'target':
+        doc.circle(cx, y + s * 0.5, s * 0.4).stroke();
+        doc.circle(cx, y + s * 0.5, s * 0.12).fill();
+        break;
+
+      case 'chart':
+        doc.moveTo(x + s * 0.08, y + s * 0.08).lineTo(x + s * 0.08, y + s * 0.9)
+          .lineTo(x + s * 0.92, y + s * 0.9).stroke();
+        doc.path(
+          `M ${x + s * 0.2} ${y + s * 0.68} L ${x + s * 0.45} ${y + s * 0.42} ` +
+          `L ${x + s * 0.62} ${y + s * 0.56} L ${x + s * 0.86} ${y + s * 0.24}`
+        ).stroke();
+        break;
+
+      case 'pin':
+        doc.circle(cx, y + s * 0.34, s * 0.22).stroke();
+        doc.path(
+          `M ${cx - s * 0.17} ${y + s * 0.48} L ${cx} ${y + s * 0.92} L ${cx + s * 0.17} ${y + s * 0.48}`
+        ).stroke();
+        break;
+
+      case 'building':
+        doc.rect(x + s * 0.14, y + s * 0.1, s * 0.72, s * 0.8).stroke();
+        doc.moveTo(x + s * 0.32, y + s * 0.3).lineTo(x + s * 0.48, y + s * 0.3)
+          .moveTo(x + s * 0.58, y + s * 0.3).lineTo(x + s * 0.72, y + s * 0.3)
+          .moveTo(x + s * 0.32, y + s * 0.5).lineTo(x + s * 0.48, y + s * 0.5)
+          .moveTo(x + s * 0.58, y + s * 0.5).lineTo(x + s * 0.72, y + s * 0.5)
+          .moveTo(x + s * 0.44, y + s * 0.72).lineTo(x + s * 0.56, y + s * 0.72)
+          .moveTo(x + s * 0.44, y + s * 0.72).lineTo(x + s * 0.44, y + s * 0.9)
+          .moveTo(x + s * 0.56, y + s * 0.72).lineTo(x + s * 0.56, y + s * 0.9)
+          .stroke();
+        break;
+
+      case 'calendar':
+        doc.roundedRect(x + s * 0.08, y + s * 0.14, s * 0.84, s * 0.76, s * 0.08).stroke();
+        doc.moveTo(x + s * 0.08, y + s * 0.36).lineTo(x + s * 0.92, y + s * 0.36).stroke();
+        doc.moveTo(x + s * 0.3, y + s * 0.04).lineTo(x + s * 0.3, y + s * 0.22)
+          .moveTo(x + s * 0.7, y + s * 0.04).lineTo(x + s * 0.7, y + s * 0.22)
+          .stroke();
+        break;
+
+      case 'globe':
+        doc.circle(cx, y + s * 0.5, s * 0.4).stroke();
+        doc.moveTo(x + s * 0.1, y + s * 0.5).lineTo(x + s * 0.9, y + s * 0.5).stroke();
+        doc.ellipse(cx, y + s * 0.5, s * 0.17, s * 0.4).stroke();
+        break;
+
+      case 'dot':
+        doc.circle(cx, y + s * 0.5, s * 0.22).fill();
+        break;
+
+      default:
+        doc.circle(cx, y + s * 0.5, s * 0.34).stroke();
+    }
+
+    doc.restore();
+  }
+
+  // Small filled square with initials, standing in for the branded link tiles
+  linkTile(doc, initials, x, y, s, color) {
+    doc.save();
+    doc.roundedRect(x, y, s, s, s * 0.22).fill(color);
+    doc.font(F.bold).fontSize(s * 0.5).fillColor(C.white)
+      .text(initials, x, y + s * 0.24, { width: s, align: 'center', lineBreak: false });
+    doc.restore();
+  }
+
+  linkIcon(doc, link, x, y, s) {
+    const host = this.hostname(link.url);
+    if (host.includes('linkedin')) return this.linkTile(doc, 'in', x, y, s, '#0a66c2');
+    if (host.includes('crunchbase')) return this.linkTile(doc, 'cb', x, y, s, '#146aff');
+    if (host.includes('finance.yahoo') || host.includes('ticker')) {
+      return this.drawIcon(doc, 'chart', x, y, s, C.blue);
+    }
+    return this.drawIcon(doc, 'globe', x, y, s, C.blue);
+  }
+
+  // =========================================================================
+  // Typography
+  // =========================================================================
+
+  /**
+   * Section title, sentence case like the deck, with an optional outline icon.
+   * `follows` is the measured height of the first block underneath, so the
+   * title never strands at the foot of a page.
+   */
+  h1(doc, ctx, text, { icon, follows = 0 } = {}) {
+    if (!this.atTop(doc)) this.space(doc, 26);
+
+    doc.font(F.bold).fontSize(16);
+    const headingHeight = doc.heightOfString(text, { width: CONTENT_WIDTH - (icon ? 24 : 0) });
+
+    const line = this.lineHeight(doc, BODY_SIZE);
+    const keep = Math.min(Math.max(follows, line * 3), PAGE_CAP * 0.5);
+    this.ensure(doc, ctx, headingHeight + 12 + keep);
+
+    ctx.toc.push({ level: 1, label: text, page: this.pageNumber(doc) });
+
+    const top = doc.y;
+    if (icon) this.drawIcon(doc, icon, MARGIN, top + 2, 13, C.blue);
+
+    doc.font(F.bold).fontSize(16).fillColor(C.ink)
+      .text(text, MARGIN + (icon ? 24 : 0), top, { width: CONTENT_WIDTH - (icon ? 24 : 0) });
+
+    this.space(doc, 12);
+  }
+
+  /**
+   * Subsection label. With an icon it reads dark like "Why Change" in the
+   * deck; without one it is the blue bold line "Company Goals" uses.
+   */
+  h3(doc, ctx, text, { icon, color = C.blue, follows = 0 } = {}) {
+    if (!this.atTop(doc)) this.space(doc, 14);
+
+    const keep = Math.min(
+      Math.max(follows, this.lineHeight(doc, BODY_SIZE) * 2),
+      PAGE_CAP * 0.5,
+    );
+    this.ensure(doc, ctx, 16 + keep);
+
+    const top = doc.y;
+    if (icon) {
+      this.drawIcon(doc, icon, MARGIN, top, 10.5, C.blue);
+      doc.font(F.bold).fontSize(10.5).fillColor(C.ink)
+        .text(text, MARGIN + 19, top, { width: CONTENT_WIDTH - 19 });
+    } else {
+      doc.font(F.bold).fontSize(10.5).fillColor(color)
+        .text(text, MARGIN, top, { width: CONTENT_WIDTH });
+    }
+
+    this.space(doc, 7);
+  }
+
+  /**
+   * One evidence-backed claim: outline icon, full-width copy, citation chips.
+   * A claim never breaks across the fold - it moves whole instead.
+   */
+  bullet(doc, ctx, item, { icon = 'dot', color = C.blue, indent = 26, size = BODY_SIZE } = {}) {
+    const text = typeof item === 'string' ? item : item?.text;
+    if (!text) return;
+
+    const citations = (typeof item === 'object' && Array.isArray(item.citations)) ? item.citations : [];
+    const options = { size, indent, citations };
+
+    this.fitBlock(doc, ctx, this.flowHeight(doc, text, options));
+
+    const top = doc.y;
+    if (icon === 'dot') {
+      doc.save().circle(MARGIN + 5, top + size * 0.56, 2.2).fill(color).restore();
+    } else {
+      this.drawIcon(doc, icon, MARGIN + 1, top + 0.5, 10.5, color);
+    }
+
+    this.writeText(doc, text, options);
+    this.space(doc, 11);
+  }
+
+  bulletHeight(doc, item, { indent = 26, size = BODY_SIZE } = {}) {
+    const text = typeof item === 'string' ? item : item?.text;
+    if (!text) return 0;
+
+    const citations = (typeof item === 'object' && Array.isArray(item.citations)) ? item.citations : [];
+    return this.flowHeight(doc, text, { size, indent, citations });
+  }
+
+  // Height of the first block of a list - what its heading keeps beside it
+  listOpener(doc, items, options) {
+    const first = (items || []).filter(Boolean)[0];
+    return first ? this.bulletHeight(doc, first, options) : 0;
+  }
+
+  subsectionsOpener(doc, groups) {
+    const first = (groups || []).find(([, items]) => (items || []).filter(Boolean).length);
+    return first ? 22 + this.listOpener(doc, first[1]) : 0;
+  }
+
+  bulletList(doc, ctx, items, options = {}) {
+    const list = (items || []).filter(Boolean);
+
+    if (!list.length) {
+      this.emptyNote(doc, ctx);
+      return;
+    }
+
+    list.forEach(item => this.bullet(doc, ctx, item, options));
+  }
+
+  emptyNote(doc, ctx) {
+    this.ensure(doc, ctx, 20);
+    this.writeText(doc, 'No supporting evidence was found for this section.', {
+      font: F.italic,
+      size: 9,
+      color: C.muted,
+      indent: 26,
+    });
+    this.space(doc, 11);
+  }
+
+  paragraph(doc, ctx, text, options = {}) {
+    if (!text) return;
+    this.fitBlock(doc, ctx, this.flowHeight(doc, text, options));
+    this.writeText(doc, text, options);
+    this.space(doc, 10);
+  }
+
+  // =========================================================================
+  // Formatting helpers
   // =========================================================================
 
   slug(value) {
@@ -625,249 +714,6 @@ class ReportGenerator {
     if (Math.abs(n) >= 1e9) return `${symbol}${(n / 1e9).toFixed(2)}B`;
     if (Math.abs(n) >= 1e6) return `${symbol}${(n / 1e6).toFixed(1)}M`;
     return `${symbol}${n.toLocaleString()}`;
-  }
-
-  /**
-   * Section title. The space above it is what keeps a heading off the tail of
-   * the block before - `moveDown` used to be measured in the 7pt citation font
-   * that had just been set, which left almost none.
-   */
-  h1(doc, ctx, text, follows = 0) {
-    // Closed before the search for room: a column opened for this heading is
-    // starting the new topic, not carrying on the old one
-    ctx.section = null;
-    ctx.subsection = null;
-
-    if (!this.atColumnTop(doc, ctx)) this.space(doc, 20);
-
-    // Hold the title back unless the block under it comes too - a heading alone
-    // at the foot of a column reads as a dead end. `follows` is that block's
-    // measured height; the cap stops an unusually long opener from pushing
-    // every heading onto a column of its own.
-    const line = this.lineHeight(doc, BODY_SIZE);
-    const keep = Math.min(Math.max(follows, line * 3), this.columnHeight(ctx) * 0.55);
-
-    // Measured, not guessed: a reserve a point short of the truth lets the
-    // heading through and strands it when the block underneath is then moved
-    doc.font(F.bold).fontSize(15);
-    const headingHeight = 10 + doc.heightOfString(text, { width: COL_WIDTH }) + 8;
-
-    this.need(doc, ctx, headingHeight + keep);
-
-    ctx.toc.push({ level: 1, label: text, page: this.pageNumber(doc) });
-
-    const x = this.colX(ctx);
-    doc.save().rect(x, doc.y, 24, 2.5).fill(C.brand).restore();
-    doc.y += 10;
-
-    doc.font(F.bold).fontSize(15).fillColor(C.ink)
-      .text(text, x, doc.y, { width: COL_WIDTH });
-
-    ctx.section = text;
-    this.space(doc, 8);
-  }
-
-  /**
-   * Subsection label inside a section. `follows` is the height of the first
-   * block underneath it, so the label is not left behind on its own.
-   */
-  h3(doc, ctx, text, color = C.brand, follows = 0) {
-    ctx.subsection = null;
-
-    if (!this.atColumnTop(doc, ctx)) this.space(doc, 12);
-
-    const keep = Math.min(
-      follows || this.lineHeight(doc, BODY_SIZE) * 2,
-      this.columnHeight(ctx) * 0.6,
-    );
-    this.need(doc, ctx, 16 + keep);
-
-    doc.font(F.bold).fontSize(8.2).fillColor(color)
-      .text(String(text).toUpperCase(), this.colX(ctx), doc.y, {
-        width: COL_WIDTH,
-        characterSpacing: 0.8,
-      });
-
-    ctx.subsection = text;
-    this.space(doc, 4);
-  }
-
-  /**
-   * One evidence-backed line: coloured marker, wrapped body text, then the
-   * citation chips the sample decks put at the end of each claim.
-   */
-  bullet(doc, ctx, item, { color = C.brand, indent = 14, size = BODY_SIZE } = {}) {
-    const text = typeof item === 'string' ? item : item?.text;
-    if (!text) return;
-
-    const citations = (typeof item === 'object' && Array.isArray(item.citations)) ? item.citations : [];
-    const options = { size, indent, citations };
-
-    // Settle the column before the marker is drawn: it cannot follow the text,
-    // and a claim split down the middle is what makes two columns hard to read
-    this.fitBlock(doc, ctx, this.flowHeight(doc, text, options));
-
-    doc.save();
-    doc.circle(this.colX(ctx) + 3.4, doc.y + size * 0.56, 2.4).fill(color);
-    doc.restore();
-
-    this.flow(doc, ctx, text, { ...options, anchored: true });
-    this.space(doc, 7);
-  }
-
-  // ---- Openers -----------------------------------------------------------
-  // What a heading needs to keep beside it: the height of the first block of
-  // whatever follows. Each returns 0 for an empty section, which leaves `h1`
-  // and `h3` on their default minimum.
-
-  bulletHeight(doc, item, { indent = 14, size = BODY_SIZE } = {}) {
-    const text = typeof item === 'string' ? item : item?.text;
-    if (!text) return 0;
-
-    const citations = (typeof item === 'object' && Array.isArray(item.citations)) ? item.citations : [];
-    return this.flowHeight(doc, text, { size, indent, citations });
-  }
-
-  listOpener(doc, items, options) {
-    const first = (items || []).filter(Boolean)[0];
-    return first ? this.bulletHeight(doc, first, options) : 0;
-  }
-
-  // A subsection opener is its label plus the first claim beneath it
-  subsectionsOpener(doc, groups) {
-    const first = (groups || []).find(([, items]) => (items || []).filter(Boolean).length);
-    return first ? 20 + this.listOpener(doc, first[1]) : 0;
-  }
-
-  bulletList(doc, ctx, items, options = {}) {
-    const list = (items || []).filter(Boolean);
-
-    if (!list.length) {
-      this.emptyNote(doc, ctx);
-      return;
-    }
-
-    list.forEach(item => this.bullet(doc, ctx, item, options));
-  }
-
-  /**
-   * A talking point is a small script rather than a bullet: a headline to find
-   * it by, the spoken body, then the ask / proof / objection cues. Each element
-   * flows independently so a long point runs on instead of being squeezed.
-   */
-  talkingPointHeight(doc, item) {
-    const point = typeof item === 'string' ? { text: item } : (item || {});
-    const body = point.text || '';
-    const indent = 24;
-
-    const heading = point.headline || this.truncate(body, 90);
-    let total = this.flowHeight(doc, heading, { font: F.bold, size: 9.6, indent, lineGap: 1.8 })
-      + 4
-      + this.flowHeight(doc, body, {
-        indent,
-        citations: Array.isArray(point.citations) ? point.citations : [],
-      });
-
-    for (const cue of [point.question, point.proof, point.objection]) {
-      if (cue) total += 18 + this.flowHeight(doc, cue, { size: 8.8, indent: indent + 2, lineGap: 2.4 });
-    }
-
-    return total;
-  }
-
-  talkingPoint(doc, ctx, item, index) {
-    const point = typeof item === 'string' ? { text: item } : (item || {});
-    const body = point.text || '';
-    if (!body && !point.headline) return;
-
-    const citations = Array.isArray(point.citations) ? point.citations : [];
-    const indent = 24;
-
-    if (index > 0) this.space(doc, 6);
-
-    const heading = point.headline || this.truncate(body, 90);
-    const headingOptions = { font: F.bold, size: 9.6, indent, lineGap: 1.8 };
-    const bodyOptions = { indent, citations };
-
-    // A talking point is read aloud as one piece, so it is placed as one piece:
-    // headline, body and all three cues move together whenever they can
-    this.fitBlock(doc, ctx, this.talkingPointHeight(doc, item), 4);
-
-    const top = doc.y;
-    const x = this.colX(ctx);
-
-    doc.save();
-    doc.roundedRect(x, top - 1, 17, 14, 3.5).fill(C.brandSoft);
-    doc.font(F.bold).fontSize(8).fillColor(C.brand)
-      .text(String(index + 1), x, top + 3, { width: 17, align: 'center', lineBreak: false });
-    doc.restore();
-    doc.y = top;
-
-    this.flow(doc, ctx, heading, { ...headingOptions, color: C.brandDark, anchored: true });
-
-    this.space(doc, 4);
-
-    if (body) {
-      this.flow(doc, ctx, body, bodyOptions);
-    }
-
-    this.cueLine(doc, ctx, 'ASK', point.question, C.brand, indent);
-    this.cueLine(doc, ctx, 'PROOF', point.proof, C.green, indent);
-    this.cueLine(doc, ctx, 'IF THEY PUSH BACK', point.objection, C.amber, indent);
-
-    this.space(doc, 12);
-  }
-
-  /**
-   * Cue label above its body rather than inline: at column width an inline
-   * "IF THEY PUSH BACK" label eats most of the first line.
-   */
-  cueLine(doc, ctx, label, text, color, baseIndent) {
-    if (!text) return;
-
-    const indent = baseIndent + 2;
-    const options = { size: 8.8, indent, lineGap: 2.4 };
-
-    this.space(doc, 6);
-
-    // The cue is the label plus what it says; neither means much alone
-    this.fitBlock(doc, ctx, 12 + this.flowHeight(doc, text, options));
-
-    doc.font(F.bold).fontSize(7.2).fillColor(color)
-      .text(label, this.colX(ctx) + indent, doc.y, {
-        width: COL_WIDTH - indent,
-        characterSpacing: 0.9,
-      });
-
-    this.space(doc, 2);
-    this.flow(doc, ctx, text, { ...options, anchored: true });
-  }
-
-  talkingPointList(doc, ctx, items) {
-    const list = (items || []).filter(Boolean);
-
-    if (!list.length) {
-      this.emptyNote(doc, ctx);
-      return;
-    }
-
-    list.forEach((item, i) => this.talkingPoint(doc, ctx, item, i));
-  }
-
-  emptyNote(doc, ctx) {
-    this.flow(doc, ctx, 'No supporting evidence was found for this section.', {
-      font: F.italic,
-      size: 8.8,
-      color: C.muted,
-      indent: 14,
-    });
-    this.space(doc, 7);
-  }
-
-  paragraph(doc, ctx, text, options = {}) {
-    if (!text) return;
-    this.flow(doc, ctx, text, options);
-    this.space(doc, 7);
   }
 
   truncate(text, max) {
@@ -899,21 +745,20 @@ class ReportGenerator {
 
   scoreColor(value) {
     if (value >= 80) return C.green;
-    if (value >= 60) return C.brand;
+    if (value >= 60) return C.blue;
     if (value >= 40) return C.amber;
     return C.muted;
   }
 
   // =========================================================================
-  // Cover
+  // Cover - laid out like the deck: title and url top left, score badge top
+  // right, then Fast Facts on the left and Quick Links / details on the right,
+  // with icons in place of labels and no rules or boxes.
   // =========================================================================
 
   coverPage(doc, ctx, report, meta) {
     ctx.group = '';
     this.newPage(doc, ctx);
-    // The cover is laid out at fixed coordinates rather than flowed, so the
-    // margins come off: every writer below stops at the footer by measuring,
-    // and nothing here should ever be able to spill onto a page of its own.
     this.withoutMargins(doc, () => this.drawCover(doc, report, meta));
   }
 
@@ -921,184 +766,76 @@ class ReportGenerator {
     const facts = report.fastFacts || {};
     const score = report.score || {};
 
-    // --- Hero band -------------------------------------------------------
-    const badgeSize = 104;
-    const badgeX = PAGE.width - MARGIN - badgeSize;
-    const titleWidth = CONTENT_WIDTH - badgeSize - 40;
+    const badgeSize = 100;
+    const titleWidth = CONTENT_WIDTH - badgeSize - 36;
 
-    doc.font(F.bold).fontSize(7.5).fillColor(C.brand)
-      .text('SALES INTELLIGENCE REPORT', MARGIN, 52, {
-        width: titleWidth,
-        characterSpacing: 1.5,
-      });
+    // --- Title ---
+    doc.font(F.bold).fontSize(30).fillColor(C.ink)
+      .text(report.companyName, MARGIN, 48, { width: titleWidth });
 
-    doc.font(F.bold).fontSize(32).fillColor(C.ink)
-      .text(report.companyName, MARGIN, doc.y + 6, { width: titleWidth });
+    doc.font(F.regular).fontSize(11).fillColor(C.muted)
+      .text(this.hostname(facts.website) || facts.industry || '', MARGIN, doc.y + 4, { width: titleWidth });
 
-    const subtitle = [
-      this.hostname(facts.website),
-      facts.industry,
-      (report.ticker || facts.ticker) ? `NYSE/LSE: ${report.ticker || facts.ticker}` : null,
-    ].filter(Boolean).join('   ·   ');
+    if (score.value) this.scoreBadge(doc, score, PAGE.width - MARGIN - badgeSize, 46, badgeSize);
 
-    doc.font(F.regular).fontSize(10).fillColor(C.muted)
-      .text(subtitle, MARGIN, doc.y + 4, { width: titleWidth });
+    // --- Two columns ---
+    const leftWidth = CONTENT_WIDTH * 0.5;
+    const rightX = MARGIN + CONTENT_WIDTH * 0.56;
+    const rightWidth = CONTENT_WIDTH * 0.44;
+    const top = 138;
 
-    if (score.value) this.scoreBadge(doc, score, badgeX, 50, badgeSize);
-
-    const ruleY = 172;
-    doc.save()
-      .moveTo(MARGIN, ruleY).lineTo(PAGE.width - MARGIN, ruleY)
-      .lineWidth(0.75).strokeColor(C.line).stroke()
-      .restore();
-
-    // --- Three columns below the rule ------------------------------------
-    const colW = (CONTENT_WIDTH - 60) / 3;
-    const colX = i => MARGIN + i * (colW + 30);
-    const top = ruleY + 24;
-
-    this.coverAbout(doc, colX(0), top, colW, facts);
-    this.coverScore(doc, colX(1), top, colW, score);
-    this.coverLinks(doc, colX(2), top, colW, report, facts, meta);
+    this.coverFacts(doc, MARGIN, top, leftWidth, report, facts, score);
+    this.coverLinks(doc, rightX, top, rightWidth, report, facts, meta);
   }
 
   coverHeading(doc, text, x, y, width) {
-    doc.font(F.bold).fontSize(11.5).fillColor(C.ink)
-      .text(text, x, y, { width });
-    const ruleY = doc.y + 5;
-    doc.save()
-      .moveTo(x, ruleY).lineTo(x + width, ruleY)
-      .lineWidth(0.75).strokeColor(C.line).stroke()
-      .restore();
-    return ruleY + 11;
+    doc.font(F.bold).fontSize(13.5).fillColor(C.ink).text(text, x, y, { width });
+    return doc.y + 10;
   }
 
-  /**
-   * Cover columns are fixed boxes rather than flowing copy. Every block is
-   * measured against the footer first and skipped whole if it does not fit, so
-   * the cover can never push a half-empty continuation page out behind it.
-   */
   coverFits(y, height) {
     return y + height <= BODY_BOTTOM - 4;
   }
 
-  coverText(doc, text, x, y, width, options = {}) {
-    const { font = F.regular, size = 8.8, color = C.body, lineGap = 2.4, gap = 0 } = options;
-    if (!text) return y;
-
-    doc.font(font).fontSize(size);
-    const height = doc.heightOfString(text, { width, lineGap });
-    if (!this.coverFits(y, height)) return null;
-
-    doc.fillColor(color).text(text, x, y, { width, lineGap, link: options.link });
-    return doc.y + gap;
-  }
-
-  coverAbout(doc, x, y, width, facts) {
-    let cursor = this.coverHeading(doc, 'About', x, y, width);
+  coverFacts(doc, x, y, width, report, facts, score) {
+    let cursor = this.coverHeading(doc, 'Fast Facts', x, y, width);
 
     if (facts.description) {
-      const next = this.coverText(doc, this.truncate(facts.description, 400), x, cursor, width, { gap: 12 });
-      if (next === null) return;
-      cursor = next;
+      doc.font(F.regular).fontSize(9.5).fillColor(C.body)
+        .text(this.truncate(facts.description, 380), x, cursor, { width, lineGap: 3 });
+      cursor = doc.y + 13;
     }
 
     const revenue = this.money(facts.revenue, facts.revenueCurrency);
     const rows = [
-      ['Headquarters', facts.headquarters],
-      ['Industry', facts.industry],
-      ['Revenue', revenue ? `${revenue}${facts.revenueAsOf ? ` (FY${facts.revenueAsOf})` : ''}` : null],
-      ['Employees', facts.employees ? Number(facts.employees).toLocaleString() : null],
-      ['Market cap', this.money(facts.marketCap)],
-      ['Founded', facts.founded ? String(facts.founded) : null],
-      ['Fiscal year starts', facts.fiscalYearStart],
+      ['pin', facts.headquarters ? `Headquartered in ${facts.headquarters}` : null],
+      ['building', facts.industry],
+      ['chart', revenue ? `${revenue} revenue${facts.revenueAsOf ? ` (FY${facts.revenueAsOf})` : ''}` : null],
+      ['person', facts.employees ? `${Number(facts.employees).toLocaleString()} employees` : null],
+      ['chart', this.money(facts.marketCap) ? `${this.money(facts.marketCap)} market cap` : null],
+      ['calendar', facts.founded ? `Founded ${facts.founded}` : null],
     ].filter(([, value]) => value);
 
-    const labelWidth = 92;
-
-    for (const [label, value] of rows) {
-      doc.font(F.regular).fontSize(9.2);
-      const height = doc.heightOfString(value, { width: width - labelWidth, lineGap: 1.5 });
+    for (const [icon, value] of rows) {
+      doc.font(F.regular).fontSize(9.5);
+      const height = doc.heightOfString(value, { width: width - 20, lineGap: 2 });
       if (!this.coverFits(cursor, height)) return;
 
-      doc.font(F.regular).fontSize(8).fillColor(C.muted)
-        .text(label.toUpperCase(), x, cursor + 1, {
-          width: labelWidth,
-          characterSpacing: 0.5,
-          lineBreak: false,
-        });
-      doc.font(F.regular).fontSize(9.2).fillColor(C.ink)
-        .text(value, x + labelWidth, cursor, { width: width - labelWidth, lineGap: 1.5 });
+      this.drawIcon(doc, icon, x, cursor - 0.5, 10.5, C.blue);
+      doc.fillColor(C.ink).text(value, x + 20, cursor, { width: width - 20, lineGap: 2 });
+      cursor = doc.y + 8;
+    }
 
-      cursor = doc.y + 7;
+    // Score narrative reads as a plain paragraph, the way the deck writes it
+    const line = score.summary
+      || (score.value ? `${report.companyName} has a Salesmotion score of ${score.value}.` : null);
+
+    if (line && this.coverFits(cursor + 8, 30)) {
+      doc.font(F.regular).fontSize(9.5).fillColor(C.body)
+        .text(line, x, cursor + 8, { width, lineGap: 3 });
     }
   }
 
-  coverScore(doc, x, y, width, score) {
-    if (!score.value && !score.summary) return;
-
-    let cursor = this.coverHeading(doc, 'Salesmotion Score', x, y, width);
-
-    if (score.summary) {
-      const next = this.coverText(doc, score.summary, x, cursor, width, { gap: 14 });
-      if (next === null) return;
-      cursor = next;
-    }
-
-    // --- Breakdown bars ---
-    const breakdown = score.breakdown || {};
-    const entries = Object.entries(SCORE_LABELS)
-      .filter(([key]) => typeof breakdown[key] === 'number');
-
-    for (const [key, label] of entries) {
-      if (!this.coverFits(cursor, 23)) break;
-      const value = Math.max(0, Math.min(100, Math.round(breakdown[key])));
-
-      doc.font(F.regular).fontSize(7.6).fillColor(C.muted)
-        .text(label.toUpperCase(), x, cursor, { width: width - 30, characterSpacing: 0.5, lineBreak: false });
-      doc.font(F.bold).fontSize(7.6).fillColor(C.ink)
-        .text(String(value), x + width - 30, cursor, { width: 30, align: 'right', lineBreak: false });
-
-      const barY = cursor + 10;
-      doc.save();
-      doc.roundedRect(x, barY, width, 4, 2).fill(C.track);
-      doc.roundedRect(x, barY, Math.max(2, width * value / 100), 4, 2).fill(this.scoreColor(value));
-      doc.restore();
-
-      cursor = barY + 13;
-    }
-
-    // --- Why this score ---
-    const reasons = (score.reasons || []).filter(Boolean);
-    if (!reasons.length) return;
-
-    // The label is only worth drawing if the first reason lands under it
-    doc.font(F.regular).fontSize(8.4);
-    const firstReason = doc.heightOfString(reasons[0], { width: width - 11, lineGap: 1.8 });
-    if (!this.coverFits(cursor + 4, 22 + firstReason)) return;
-
-    cursor += 4;
-    doc.font(F.bold).fontSize(7.6).fillColor(C.brand)
-      .text('WHY THIS SCORE', x, cursor, { width, characterSpacing: 0.9 });
-    cursor = doc.y + 6;
-
-    for (const reason of reasons) {
-      doc.font(F.regular).fontSize(8.4);
-      const height = doc.heightOfString(reason, { width: width - 11, lineGap: 1.8 });
-      if (!this.coverFits(cursor, height)) return;
-
-      doc.save().circle(x + 2.4, cursor + 4.4, 1.9).fill(C.brand).restore();
-      doc.font(F.regular).fontSize(8.4).fillColor(C.body)
-        .text(reason, x + 11, cursor, { width: width - 11, lineGap: 1.8 });
-      cursor = doc.y + 5;
-    }
-  }
-
-  /**
-   * Third cover column: where to read more, plus the three facts a reader
-   * checks before trusting the document. The rest of the brief that produced it
-   * is set out in full by `reportContextSection` at the back.
-   */
   coverLinks(doc, x, y, width, report, facts, meta) {
     let cursor = this.coverHeading(doc, 'Quick Links', x, y, width);
 
@@ -1110,43 +847,43 @@ class ReportGenerator {
     }
 
     for (const link of links.slice(0, 7)) {
-      const next = this.coverText(doc, link.label, x, cursor, width, {
-        size: 9,
-        color: C.link,
-        lineGap: 1.5,
+      doc.font(F.regular).fontSize(9.5);
+      const height = doc.heightOfString(link.label, { width: width - 20, lineGap: 2 });
+      if (!this.coverFits(cursor, height)) break;
+
+      this.linkIcon(doc, link, x, cursor - 0.5, 10.5);
+      // linkIcon may set a tiny font to draw tile initials - font is not part
+      // of pdfkit's saved graphics state, so it has to be set back explicitly
+      doc.font(F.regular).fontSize(9.5).fillColor(C.blue).text(link.label, x + 20, cursor, {
+        width: width - 20,
+        lineGap: 2,
         link: link.url,
-        gap: 5,
       });
-      if (next === null) break;
-      cursor = next;
+      cursor = doc.y + 8;
     }
 
+    // --- Account information ---
     const context = report.context || {};
     const rows = [
-      ['Prepared for', context.sellerName || meta.seller?.name],
-      ['Account added', this.day(report.accountAddedAt || meta.company?.addedAt)],
-      // Regenerating writes a new report, so for this one the two are minutes
-      // apart; lastUpdatedAt is when the pipeline finished writing it
-      ['Last refreshed', this.moment(report.lastUpdatedAt || report.generatedAt)],
+      ['calendar', report.accountAddedAt || meta.company?.addedAt
+        ? `Added ${this.day(report.accountAddedAt || meta.company?.addedAt)}` : null],
+      ['person', (context.sellerName || meta.seller?.name)
+        ? `Prepared for ${context.sellerName || meta.seller?.name}` : null],
+      ['clock', this.moment(report.lastUpdatedAt || report.generatedAt)
+        ? `Last refreshed ${this.moment(report.lastUpdatedAt || report.generatedAt)}` : null],
     ].filter(([, value]) => value);
 
-    if (!rows.length) return;
+    if (!rows.length || !this.coverFits(cursor + 18, 40)) return;
 
-    doc.font(F.regular).fontSize(8.8);
-    const firstRow = doc.heightOfString(rows[0][1], { width, lineGap: 1.6 }) + 11;
-    if (!this.coverFits(cursor + 16, 30 + firstRow)) return;
+    cursor = this.coverHeading(doc, 'Account Information', x, cursor + 18, width);
 
-    cursor = this.coverHeading(doc, 'Report Details', x, cursor + 16, width);
-
-    for (const [label, value] of rows) {
-      doc.font(F.regular).fontSize(8.8);
-      const height = doc.heightOfString(value, { width, lineGap: 1.6 }) + 11;
+    for (const [icon, value] of rows) {
+      doc.font(F.regular).fontSize(9.5);
+      const height = doc.heightOfString(value, { width: width - 20, lineGap: 2 });
       if (!this.coverFits(cursor, height)) return;
 
-      doc.font(F.bold).fontSize(7.4).fillColor(C.muted)
-        .text(label.toUpperCase(), x, cursor, { width, characterSpacing: 0.6 });
-      doc.font(F.regular).fontSize(8.8).fillColor(C.ink)
-        .text(value, x, doc.y + 1.5, { width, lineGap: 1.6 });
+      this.drawIcon(doc, icon, x, cursor - 0.5, 10.5, C.blue);
+      doc.fillColor(C.ink).text(value, x + 20, cursor, { width: width - 20, lineGap: 2 });
       cursor = doc.y + 8;
     }
   }
@@ -1155,27 +892,20 @@ class ReportGenerator {
     const colour = this.scoreColor(score.value);
 
     doc.save();
-    doc.roundedRect(x, y, size, size, 14).fill(C.surface);
+    doc.roundedRect(x, y, size, size, 14).fill(C.white);
     doc.roundedRect(x, y, size, size, 14).lineWidth(1).strokeColor(C.line).stroke();
 
-    doc.font(F.bold).fontSize(36).fillColor(colour)
-      .text(String(score.value), x, y + 20, { width: size, align: 'center' });
+    doc.font(F.bold).fontSize(34).fillColor(colour)
+      .text(String(score.value), x, y + 19, { width: size, align: 'center' });
     doc.font(F.bold).fontSize(8).fillColor(C.ink)
-      .text((score.band || '').toUpperCase(), x, y + 61, { width: size, align: 'center', characterSpacing: 0.8 });
-
-    doc.save().moveTo(x + 26, y + 76).lineTo(x + size - 26, y + 76)
-      .lineWidth(0.75).strokeColor(C.line).stroke().restore();
-
-    doc.font(F.regular).fontSize(7).fillColor(C.muted)
-      .text('SALESMOTION SCORE', x, y + 83, { width: size, align: 'center', characterSpacing: 0.5 });
+      .text((score.band || '').toUpperCase(), x, y + 58, { width: size, align: 'center', characterSpacing: 0.8 });
+    doc.font(F.regular).fontSize(6.8).fillColor(C.muted)
+      .text('SALESMOTION SCORE', x, y + 78, { width: size, align: 'center', characterSpacing: 0.4 });
     doc.restore();
   }
 
   // =========================================================================
-  // Contents
-  //
-  // The page is claimed up front and filled in at the end, once every section
-  // knows which page it landed on.
+  // Contents - claimed up front, filled in once every section knows its page
   // =========================================================================
 
   contentsPlaceholder(doc, ctx) {
@@ -1190,25 +920,20 @@ class ReportGenerator {
     doc.switchToPage(ctx.tocPageIndex);
 
     this.withoutMargins(doc, () => {
-      doc.font(F.bold).fontSize(22).fillColor(C.ink)
-        .text('Contents', MARGIN, BODY_TOP - 4, { width: CONTENT_WIDTH });
+      doc.font(F.bold).fontSize(16).fillColor(C.ink)
+        .text('Contents', MARGIN, BODY_TOP, { width: CONTENT_WIDTH });
 
-      const ruleY = doc.y + 12;
-      doc.save()
-        .moveTo(MARGIN, ruleY).lineTo(PAGE.width - MARGIN, ruleY)
-        .lineWidth(0.75).strokeColor(C.line).stroke()
-        .restore();
-
-      const top = ruleY + 20;
+      const top = doc.y + 16;
+      const colWidth = (CONTENT_WIDTH - 60) / 2;
       let col = 0;
       let cursor = top;
 
-      const x = () => MARGIN + col * (COL_WIDTH + GUTTER);
+      const x = () => MARGIN + col * (colWidth + 60);
 
       ctx.toc.forEach(entry => {
-        const height = entry.level === 0 ? 30 : 17;
+        const height = entry.level === 0 ? 30 : 18;
         if (cursor + height > BODY_BOTTOM) {
-          if (col >= COLUMNS - 1) return; // more sections than the page can list
+          if (col >= 1) return; // more sections than the page can list
           col += 1;
           cursor = top;
         }
@@ -1216,24 +941,26 @@ class ReportGenerator {
         const isGroup = entry.level === 0;
         if (isGroup && cursor > top) cursor += 10;
 
-        const indent = isGroup ? 0 : 14;
+        const indent = isGroup ? 0 : 16;
         const numberWidth = 28;
-        const labelWidth = COL_WIDTH - indent - numberWidth - 6;
 
         doc.font(isGroup ? F.bold : F.regular)
-          .fontSize(isGroup ? 10.5 : 9.2)
+          .fontSize(isGroup ? 10.5 : 9.5)
           .fillColor(isGroup ? C.ink : C.body)
-          .text(entry.label, x() + indent, cursor, { width: labelWidth, lineBreak: false });
+          .text(entry.label, x() + indent, cursor, {
+            width: colWidth - indent - numberWidth - 6,
+            lineBreak: false,
+          });
 
-        doc.font(isGroup ? F.bold : F.regular).fontSize(isGroup ? 10.5 : 9.2)
-          .fillColor(isGroup ? C.brand : C.muted)
-          .text(String(entry.page), x() + COL_WIDTH - numberWidth, cursor, {
+        doc.font(isGroup ? F.bold : F.regular).fontSize(isGroup ? 10.5 : 9.5)
+          .fillColor(isGroup ? C.blue : C.muted)
+          .text(String(entry.page), x() + colWidth - numberWidth, cursor, {
             width: numberWidth,
             align: 'right',
             lineBreak: false,
           });
 
-        cursor += isGroup ? 20 : 17;
+        cursor += isGroup ? 21 : 18;
       });
     });
   }
@@ -1245,56 +972,59 @@ class ReportGenerator {
   executiveBriefPages(doc, ctx, report) {
     const brief = report.executiveBrief || {};
 
-    this.h1(doc, ctx, 'Key Insights', this.listOpener(doc, brief.keyInsights));
-    this.bulletList(doc, ctx, brief.keyInsights, { color: C.amber });
+    this.h1(doc, ctx, 'Key Insights', { follows: this.listOpener(doc, brief.keyInsights) });
+    this.bulletList(doc, ctx, brief.keyInsights, { icon: 'bulb', color: C.amber });
 
-    this.h1(doc, ctx, 'Opportunities', this.listOpener(doc, brief.opportunities));
-    this.bulletList(doc, ctx, brief.opportunities, { color: C.green });
+    this.h1(doc, ctx, 'Opportunities', { follows: this.listOpener(doc, brief.opportunities) });
+    this.bulletList(doc, ctx, brief.opportunities, { icon: 'case', color: C.green });
 
-    this.h1(doc, ctx, 'Challenges', this.listOpener(doc, brief.challenges));
-    this.bulletList(doc, ctx, brief.challenges, { color: C.red });
+    this.h1(doc, ctx, 'Challenges', { follows: this.listOpener(doc, brief.challenges) });
+    this.bulletList(doc, ctx, brief.challenges, { icon: 'case', color: C.red });
 
-    this.h1(doc, ctx, 'People Updates', this.listOpener(doc, brief.peopleUpdates));
-    this.bulletList(doc, ctx, brief.peopleUpdates, { color: C.purple });
+    this.h1(doc, ctx, 'People Updates', { follows: this.listOpener(doc, brief.peopleUpdates) });
+    this.bulletList(doc, ctx, brief.peopleUpdates, { icon: 'person', color: C.blue });
 
     const news = (brief.topNews || []).filter(n => n?.title);
-    this.h1(doc, ctx, 'Top News', this.newsItemHeight(doc, news[0]));
+    this.h1(doc, ctx, 'Top News', { follows: this.newsItemHeight(doc, news[0]) });
     this.newsList(doc, ctx, brief.topNews);
 
     const points = (brief.talkingPoints || []).filter(Boolean);
-    this.h1(doc, ctx, 'Talking Points', points[0] ? this.talkingPointHeight(doc, points[0]) : 0);
+    this.h1(doc, ctx, 'Talking Points', {
+      follows: points[0] ? this.talkingPointHeight(doc, points[0]) : 0,
+    });
     this.talkingPointList(doc, ctx, brief.talkingPoints);
 
     if (brief.executivePerspective?.length) {
-      this.h1(doc, ctx, 'Executive Perspective',
-        this.quoteCardHeight(doc, brief.executivePerspective[0]));
+      this.h1(doc, ctx, 'Executive Perspective', {
+        follows: this.quoteCardHeight(doc, brief.executivePerspective[0]),
+      });
       brief.executivePerspective.forEach(q => this.quoteCard(doc, ctx, q));
     }
   }
 
   newsParts(item) {
-    const indent = 14;
+    const indent = 26;
 
     return {
       indent,
-      summary: item.summary ? this.truncate(item.summary, 320) : '',
+      summary: item.summary ? this.truncate(item.summary, 340) : '',
       meta: [item.source, item.publishedAt ? this.formatDate(item.publishedAt) : null]
         .filter(Boolean).join('  ·  '),
       titleOptions: {
         font: F.bold,
-        size: 9.4,
+        size: 9.8,
         color: C.ink,
         indent,
-        lineGap: 1.8,
+        lineGap: 2.2,
         link: item.url || undefined,
       },
       summaryOptions: {
-        size: 8.8,
+        size: 9.2,
         indent,
-        lineGap: 2.2,
+        lineGap: 2.6,
         citations: Array.isArray(item.citations) ? item.citations : [],
       },
-      metaOptions: { size: 7.4, color: C.muted, indent },
+      metaOptions: { size: 7.8, color: C.muted, indent },
     };
   }
 
@@ -1316,134 +1046,175 @@ class ReportGenerator {
     }
 
     list.forEach(item => {
-      const { indent, summary, meta, titleOptions, summaryOptions, metaOptions } =
-        this.newsParts(item);
+      const { summary, meta, titleOptions, summaryOptions, metaOptions } = this.newsParts(item);
 
       // Headline, summary and byline are one story - they move together
       this.fitBlock(doc, ctx, this.newsItemHeight(doc, item));
 
-      doc.save();
-      doc.circle(this.colX(ctx) + 3.4, doc.y + 5.2, 2.4).fill(C.teal);
-      doc.restore();
-
-      this.flow(doc, ctx, item.title, { ...titleOptions, anchored: true });
+      this.drawIcon(doc, 'news', MARGIN + 1, doc.y + 0.5, 10.5, C.blue);
+      this.writeText(doc, item.title, titleOptions);
 
       if (summary) {
         this.space(doc, 3);
-        this.flow(doc, ctx, summary, summaryOptions);
+        this.writeText(doc, summary, summaryOptions);
       }
 
       if (meta) {
         this.space(doc, 3);
-        this.flow(doc, ctx, meta, metaOptions);
+        this.writeText(doc, meta, metaOptions);
       }
 
-      this.space(doc, 10);
+      this.space(doc, 13);
     });
   }
 
-  /**
-   * Quotes sit on a tinted card. A quote taller than a column would have no
-   * card to sit on, so in that case it is split and each part gets its own.
-   */
   quoteCardHeight(doc, quote) {
     if (!quote?.quote) return 0;
 
-    const attribution = [quote.person, quote.title, quote.source].filter(Boolean).join(', ');
-    doc.font(F.italic).fontSize(9.6);
+    const attribution = [quote.person, quote.title].filter(Boolean).join(', ');
+    doc.font(F.italic).fontSize(10.2);
 
-    return doc.heightOfString(`“${String(quote.quote).trim()}”`, {
-      width: COL_WIDTH - 13 * 2 - 3,
-      lineGap: 2.4,
-    }) + 26 + (attribution ? 16 : 0);
+    return doc.heightOfString(`"${String(quote.quote).trim()}"`, {
+      width: CONTENT_WIDTH - 36,
+      lineGap: 3,
+    }) + 30 + (attribution ? 18 : 0);
   }
 
+  /**
+   * Full-width tinted card, italic quote, muted attribution - no accent bar,
+   * matching the deck. A quote taller than a page falls back to plain text.
+   */
   quoteCard(doc, ctx, quote) {
-    const padding = 13;
-    const accent = 3;
-    const inner = COL_WIDTH - padding * 2 - accent;
-    const attribution = [quote.person, quote.title, quote.source].filter(Boolean).join(', ');
+    if (!quote?.quote) return;
+
+    const padding = 15;
+    const inner = CONTENT_WIDTH - padding * 2 - 6;
+    const body = `"${String(quote.quote).trim()}"`;
+    const attributionParts = [quote.person, quote.title].filter(Boolean).join(', ');
+    const source = quote.source ? ` at ${quote.source}` : '';
+    const attribution = attributionParts ? `– ${attributionParts}${source}` : '';
     const citations = Array.isArray(quote.citations) ? quote.citations : [];
 
-    const body = `“${String(quote.quote || '').trim()}”`;
-    if (!quote.quote) return;
+    const height = this.quoteCardHeight(doc, quote);
 
-    // A quote broken over two cards reads as two quotes, so one that fits in a
-    // fresh column is moved there whole
-    this.fitBlock(doc, ctx, this.quoteCardHeight(doc, quote));
-
-    let rest = body;
-    let guard = 0;
-
-    while (rest && guard++ < 40) {
-      doc.font(F.italic).fontSize(9.6);
-      const lineGap = 2.4;
-      const line = this.lineHeight(doc, 9.6, lineGap);
-
-      // The attribution only rides along with the closing part of the quote
-      const footHeight = attribution ? 16 : 0;
-      let avail = this.room(doc) - padding * 2 - footHeight;
-
-      if (avail < line * 2) {
-        this.nextColumn(doc, ctx);
-        continue;
+    if (height > PAGE_CAP) {
+      // No card can hold it; the words still land on the page
+      this.paragraph(doc, ctx, body, { font: F.italic, size: 10.2, color: C.ink, lineGap: 3 });
+      if (attribution) {
+        this.paragraph(doc, ctx, attribution, { size: 8.6, color: C.muted, citations });
       }
-
-      const full = doc.heightOfString(rest, { width: inner, lineGap });
-      const isLast = full <= avail;
-      let chunk = rest;
-
-      if (!isLast) {
-        const cut = this.splitIndex(doc, rest, inner, lineGap, this.room(doc) - padding * 2);
-        if (cut <= 0) {
-          if (this.atColumnTop(doc, ctx)) {
-            // See the note in `flow`: an unbroken run this long cannot be
-            // placed by moving it. The card is what gets dropped, not the words
-            this.flow(doc, ctx, rest, { font: F.italic, size: 9.6, color: C.ink, lineGap });
-            if (attribution) {
-              this.flow(doc, ctx, `— ${attribution}`, { font: F.bold, size: 8, color: C.brandDark, citations });
-            }
-            this.space(doc, 12);
-            return;
-          }
-          this.nextColumn(doc, ctx);
-          continue;
-        }
-        chunk = rest.slice(0, cut);
-      }
-
-      const textHeight = doc.heightOfString(chunk, { width: inner, lineGap });
-      const cardHeight = textHeight + padding * 2 + (isLast ? footHeight : 0);
-      const top = doc.y;
-      const x = this.colX(ctx);
-
-      doc.save();
-      doc.roundedRect(x, top, COL_WIDTH, cardHeight, 7).fill(C.brandSoft);
-      doc.roundedRect(x, top, accent, cardHeight, 1.5).fill(C.brand);
-      doc.restore();
-
-      doc.font(F.italic).fontSize(9.6).fillColor(C.ink)
-        .text(chunk, x + accent + padding, top + padding, { width: inner, lineGap });
-
-      if (isLast && attribution) {
-        doc.font(F.bold).fontSize(8).fillColor(C.brandDark)
-          .text(`— ${attribution}`, x + accent + padding, top + cardHeight - padding - 4, {
-            width: inner,
-            lineBreak: false,
-            continued: citations.length > 0,
-          });
-        if (citations.length) {
-          doc.font(F.bold).fontSize(6.8).fillColor(C.link)
-            .text(`  ${citations.map(n => `[${n}]`).join(' ')}`, { lineBreak: false });
-        }
-      }
-
-      doc.y = top + cardHeight;
-      rest = isLast ? '' : rest.slice(chunk.length).replace(/^\s+/, '');
-      if (rest) this.nextColumn(doc, ctx);
+      return;
     }
 
-    this.space(doc, 12);
+    this.fitBlock(doc, ctx, height);
+
+    const top = doc.y;
+    doc.save();
+    doc.roundedRect(MARGIN, top, CONTENT_WIDTH, height, 8).fill(C.card);
+    doc.restore();
+
+    doc.font(F.italic).fontSize(10.2).fillColor(C.ink)
+      .text(body, MARGIN + padding, top + padding, { width: inner, lineGap: 3 });
+
+    if (attribution) {
+      doc.font(F.regular).fontSize(8.6).fillColor(C.muted)
+        .text(attribution, MARGIN + padding, top + height - padding - 8, {
+          width: inner,
+          lineBreak: false,
+          continued: citations.length > 0,
+        });
+      if (citations.length) {
+        doc.font(F.bold).fontSize(7.2).fillColor(C.blue)
+          .text(`  ${citations.map(n => `[${n}]`).join('  ')}`, { lineBreak: false });
+      }
+    }
+
+    doc.y = top + height;
+    this.space(doc, 14);
+  }
+
+  /**
+   * A talking point keeps its headline, spoken body and cues together, led by
+   * the deck's chat icon.
+   */
+  talkingPointHeight(doc, item) {
+    const point = typeof item === 'string' ? { text: item } : (item || {});
+    const body = point.text || '';
+    const indent = 26;
+
+    const heading = point.headline || this.truncate(body, 90);
+    let total = this.flowHeight(doc, heading, { font: F.bold, size: 9.8, indent, lineGap: 2.2 })
+      + 4
+      + this.flowHeight(doc, body, {
+        indent,
+        citations: Array.isArray(point.citations) ? point.citations : [],
+      });
+
+    for (const cue of [point.question, point.proof, point.objection]) {
+      if (cue) total += 19 + this.flowHeight(doc, cue, { size: 9, indent: indent + 2, lineGap: 2.6 });
+    }
+
+    return total;
+  }
+
+  talkingPoint(doc, ctx, item, index) {
+    const point = typeof item === 'string' ? { text: item } : (item || {});
+    const body = point.text || '';
+    if (!body && !point.headline) return;
+
+    const citations = Array.isArray(point.citations) ? point.citations : [];
+    const indent = 26;
+
+    if (index > 0) this.space(doc, 5);
+
+    this.fitBlock(doc, ctx, this.talkingPointHeight(doc, item), 4);
+
+    this.drawIcon(doc, 'chat', MARGIN + 1, doc.y + 0.5, 10.5, C.blue);
+
+    const heading = point.headline || this.truncate(body, 90);
+    this.writeText(doc, heading, { font: F.bold, size: 9.8, color: C.ink, indent, lineGap: 2.2 });
+    this.space(doc, 4);
+
+    if (body) {
+      this.writeText(doc, body, { indent, citations });
+    }
+
+    this.cueLine(doc, ctx, 'ASK', point.question, C.blue, indent);
+    this.cueLine(doc, ctx, 'PROOF', point.proof, C.green, indent);
+    this.cueLine(doc, ctx, 'IF THEY PUSH BACK', point.objection, C.amber, indent);
+
+    this.space(doc, 13);
+  }
+
+  // Cue label above its body; the pair never separates
+  cueLine(doc, ctx, label, text, color, baseIndent) {
+    if (!text) return;
+
+    const indent = baseIndent + 2;
+    const options = { size: 9, indent, lineGap: 2.6 };
+
+    this.space(doc, 7);
+    this.fitBlock(doc, ctx, 12 + this.flowHeight(doc, text, options));
+
+    doc.font(F.bold).fontSize(7.4).fillColor(color)
+      .text(label, MARGIN + indent, doc.y, {
+        width: CONTENT_WIDTH - indent,
+        characterSpacing: 0.9,
+      });
+
+    this.space(doc, 2.5);
+    this.writeText(doc, text, options);
+  }
+
+  talkingPointList(doc, ctx, items) {
+    const list = (items || []).filter(Boolean);
+
+    if (!list.length) {
+      this.emptyNote(doc, ctx);
+      return;
+    }
+
+    list.forEach((item, i) => this.talkingPoint(doc, ctx, item, i));
   }
 
   // =========================================================================
@@ -1453,58 +1224,52 @@ class ReportGenerator {
   researchPages(doc, ctx, report) {
     const r = report.research || {};
 
-    this.subsectionSection(doc, ctx, 'Insights', [
+    this.subsectionSection(doc, ctx, 'Insights', { icon: 'bulb' }, [
       ['Company Overview', r.companyOverview],
-      ['Key People Changes', r.keyPeopleChanges, C.purple],
+      ['Key People Changes', r.keyPeopleChanges],
       ['Key Projects', r.keyProjects],
       ['Aspirations', r.aspirations],
       ['Business Goals', r.businessGoals],
-      ['Opportunities', r.opportunities, C.green],
-      ['Macroeconomic Perspective', r.macroPerspective, C.teal],
+      ['Opportunities', r.opportunities],
+      ['Macroeconomic Perspective', r.macroPerspective],
       ['Recent Press Announcements', r.recentPress],
     ]);
 
-    this.subsectionSection(doc, ctx, 'Business Model', [
+    this.subsectionSection(doc, ctx, 'Business Model', { icon: 'case' }, [
       ['Revenue Streams', r.businessModel?.revenueStreams],
       ['Go-to-Market Strategy', r.businessModel?.goToMarket],
       ['Ideal Customer Profile', r.businessModel?.idealCustomerProfile],
     ]);
 
-    this.h1(doc, ctx, 'Strategic Initiatives', this.listOpener(doc, r.strategicInitiatives));
-    this.bulletList(doc, ctx, r.strategicInitiatives, { color: C.brand });
+    this.h1(doc, ctx, 'Strategic Initiatives', {
+      icon: 'target',
+      follows: this.listOpener(doc, r.strategicInitiatives),
+    });
+    this.bulletList(doc, ctx, r.strategicInitiatives);
 
-    this.h1(doc, ctx, 'Financials', this.listOpener(doc, r.financials));
-    this.bulletList(doc, ctx, r.financials, { color: C.teal });
+    this.h1(doc, ctx, 'Financials', {
+      icon: 'chart',
+      follows: this.listOpener(doc, r.financials),
+    });
+    this.bulletList(doc, ctx, r.financials);
 
-    this.subsectionSection(doc, ctx, 'SWOT Analysis', [
+    this.subsectionSection(doc, ctx, 'SWOT Analysis', {}, [
       ['Strengths', r.swot?.strengths, C.green],
       ['Weaknesses', r.swot?.weaknesses, C.red],
-      ['Opportunities', r.swot?.opportunities, C.brand],
+      ['Opportunities', r.swot?.opportunities, C.blue],
       ['Threats', r.swot?.threats, C.amber],
     ]);
   }
 
-  // A section built from labelled subsections. Grouping them lets the title
-  // measure the first claim it has to keep beside it.
-  subsectionSection(doc, ctx, title, groups) {
-    this.h1(doc, ctx, title, this.subsectionsOpener(doc, groups));
+  // A section of labelled subsections; the title keeps the first claim with it
+  subsectionSection(doc, ctx, title, headingOptions, groups) {
+    this.h1(doc, ctx, title, { ...headingOptions, follows: this.subsectionsOpener(doc, groups) });
     groups.forEach(([label, items, color]) => this.subsection(doc, ctx, label, items, color));
   }
 
-  subsection(doc, ctx, title, items, color = C.brand) {
-    const first = (items || []).filter(Boolean)[0];
-    const text = typeof first === 'string' ? first : first?.text;
-
-    // Measure the first claim so the label travels with it
-    const follows = text
-      ? this.flowHeight(doc, text, {
-        indent: 14,
-        citations: (typeof first === 'object' && first.citations) || [],
-      })
-      : 0;
-
-    this.h3(doc, ctx, title, color, follows);
-    this.bulletList(doc, ctx, items, { color });
+  subsection(doc, ctx, title, items, color = C.blue) {
+    this.h3(doc, ctx, title, { color, follows: this.listOpener(doc, items) });
+    this.bulletList(doc, ctx, items, { icon: 'dot', color });
   }
 
   // =========================================================================
@@ -1514,25 +1279,27 @@ class ReportGenerator {
   valuePages(doc, ctx, report) {
     const v = report.value || {};
 
-    this.subsectionSection(doc, ctx, 'Three Whys', [
-      ['Why Change', v.whyChange, C.purple],
-      ['Why Now', v.whyNow, C.amber],
-      ['Why You', v.whyYou, C.green],
-    ]);
+    // Three Whys reads like the deck: dark subheads with their own icons
+    this.h1(doc, ctx, 'Three Whys', {
+      follows: 20 + this.listOpener(doc, v.whyChange),
+    });
+    this.whySubsection(doc, ctx, 'Why Change', 'refresh', v.whyChange);
+    this.whySubsection(doc, ctx, 'Why Now', 'clock', v.whyNow);
+    this.whySubsection(doc, ctx, 'Why You', 'arrow', v.whyYou);
 
-    this.subsectionSection(doc, ctx, 'Value Pyramid', [
+    this.subsectionSection(doc, ctx, 'Value Pyramid', { icon: 'diamond' }, [
       ['Company Goals', v.valuePyramid?.companyGoals],
       ['Business Strategy', v.valuePyramid?.businessStrategy],
-      ['Challenges and Obstacles', v.valuePyramid?.challengesObstacles, C.red],
-      ['Value Paths', v.valuePyramid?.valuePaths, C.teal],
+      ['Challenges and Obstacles', v.valuePyramid?.challengesObstacles],
+      ['Value Paths', v.valuePyramid?.valuePaths],
     ]);
 
     if (v.valuePropositions?.length) {
       const propParts = (prop, idx) => ({
         title: `${idx + 1}. ${prop.title}`,
-        titleOptions: { font: F.bold, size: 10, color: C.ink, lineGap: 1.8 },
+        titleOptions: { font: F.bold, size: 10, color: C.ink, indent: 26, lineGap: 2.2 },
         bodyOptions: {
-          indent: 14,
+          indent: 26,
           citations: Array.isArray(prop.citations) ? prop.citations : [],
         },
       });
@@ -1543,26 +1310,41 @@ class ReportGenerator {
           + this.flowHeight(doc, prop.body, bodyOptions);
       };
 
-      this.h1(doc, ctx, 'Value Proposition Ideas', propHeight(v.valuePropositions[0], 0));
+      this.h1(doc, ctx, 'Value Proposition Ideas', {
+        icon: 'bulb',
+        follows: propHeight(v.valuePropositions[0], 0),
+      });
 
       v.valuePropositions.forEach((prop, idx) => {
         const { title, titleOptions, bodyOptions } = propParts(prop, idx);
 
         this.fitBlock(doc, ctx, propHeight(prop, idx));
 
-        this.flow(doc, ctx, title, { ...titleOptions, anchored: true });
+        doc.save().circle(MARGIN + 5, doc.y + 5.5, 2.2).fill(C.blue).restore();
+        this.writeText(doc, title, titleOptions);
         this.space(doc, 4);
 
-        this.flow(doc, ctx, prop.body, bodyOptions);
-        this.space(doc, 11);
+        this.writeText(doc, prop.body, bodyOptions);
+        this.space(doc, 12);
       });
     }
 
-    this.h1(doc, ctx, 'Value Hypothesis', this.listOpener(doc, v.hypotheses));
-    this.bulletList(doc, ctx, v.hypotheses, { color: C.purple });
+    this.h1(doc, ctx, 'Value Hypothesis', {
+      icon: 'question',
+      follows: this.listOpener(doc, v.hypotheses),
+    });
+    this.bulletList(doc, ctx, v.hypotheses);
 
-    this.h1(doc, ctx, 'Point of View', this.listOpener(doc, v.pointOfView));
-    this.bulletList(doc, ctx, v.pointOfView, { color: C.brand });
+    this.h1(doc, ctx, 'Point of View', {
+      icon: 'eye',
+      follows: this.listOpener(doc, v.pointOfView),
+    });
+    this.bulletList(doc, ctx, v.pointOfView);
+  }
+
+  whySubsection(doc, ctx, title, icon, items) {
+    this.h3(doc, ctx, title, { icon, follows: this.listOpener(doc, items) });
+    this.bulletList(doc, ctx, items, { icon: 'dot', color: C.blue });
   }
 
   // =========================================================================
@@ -1572,11 +1354,10 @@ class ReportGenerator {
   sourcesPage(doc, ctx, report) {
     const sources = report.sources || [];
 
-    this.h1(doc, ctx, 'Reference List', 20 + this.flowHeight(doc, sources[0]?.title || '', {
-      size: 8.6,
-      indent: 26,
-      lineGap: 1.8,
-    }));
+    this.h1(doc, ctx, 'Reference List', {
+      icon: 'news',
+      follows: 22 + this.flowHeight(doc, sources[0]?.title || '', { size: 9, indent: 30, lineGap: 2.2 }),
+    });
 
     if (!sources.length) {
       this.emptyNote(doc, ctx);
@@ -1584,11 +1365,12 @@ class ReportGenerator {
     }
 
     this.paragraph(doc, ctx, 'Numbered references cited throughout this report.', {
-      size: 8.8,
+      size: 9,
       color: C.muted,
     });
+    this.space(doc, 4);
 
-    const indent = 26;
+    const indent = 30;
 
     sources.forEach(source => {
       const title = source.title || 'Untitled';
@@ -1599,43 +1381,43 @@ class ReportGenerator {
       ].filter(Boolean).join('  ·  ');
 
       const titleOptions = {
-        size: 8.6,
+        size: 9,
         color: C.body,
         indent,
-        lineGap: 1.8,
+        lineGap: 2.2,
         link: source.url || undefined,
       };
-      const metaOptions = { size: 7.4, color: C.muted, indent, lineGap: 1.4 };
+      const metaOptions = { size: 7.8, color: C.muted, indent, lineGap: 1.6 };
 
       // A reference number stranded from its title is worse than useless
       this.fitBlock(doc, ctx,
         this.flowHeight(doc, title, titleOptions)
         + (meta ? this.flowHeight(doc, meta, metaOptions) : 0));
 
-      // The marker is a hanging label, not a line of its own: writing it moves
-      // the cursor, so the title is put back on the same line
+      // Hanging label: writing it moves the cursor, so the title goes back up
       const top = doc.y;
-      doc.font(F.bold).fontSize(7.8).fillColor(C.link)
-        .text(`[${source.index}]`, this.colX(ctx), top + 0.8, { width: indent - 4, lineBreak: false });
+      doc.font(F.bold).fontSize(8).fillColor(C.blue)
+        .text(`[${source.index}]`, MARGIN, top + 0.8, { width: indent - 4, lineBreak: false });
       doc.y = top;
 
-      this.flow(doc, ctx, title, { ...titleOptions, anchored: true });
+      this.writeText(doc, title, titleOptions);
 
       if (meta) {
-        this.flow(doc, ctx, meta, metaOptions);
+        this.writeText(doc, meta, metaOptions);
       }
 
-      this.space(doc, 7);
+      this.space(doc, 8);
     });
   }
 
   /**
-   * The brief this report was written against. It lives at the back rather than
-   * on the cover because it runs to a dozen fields, and a reader only reaches
-   * for it to answer "why does this report say what it says".
+   * The brief this report was written against, plus the score arithmetic. At
+   * the back because a reader only reaches for it to answer "why does this
+   * report say what it says".
    */
   reportContextSection(doc, ctx, report, meta = {}) {
     const context = report.context || {};
+    const score = report.score || {};
 
     const rows = [
       ['Prepared for', context.sellerName || meta.seller?.name],
@@ -1648,35 +1430,78 @@ class ReportGenerator {
       ['Target departments', (context.targetDepartments || []).join(', ')],
       ['Account added', this.day(report.accountAddedAt || meta.company?.addedAt)],
       ['Report generated', this.moment(report.generatedAt)],
+      // Regenerating writes a new report, so for this one the two are minutes
+      // apart; lastUpdatedAt is when the pipeline finished writing it
       ['Last refreshed', this.moment(report.lastUpdatedAt || report.generatedAt)],
       ['Written by', report.aiModel],
     ].filter(([, value]) => value);
 
-    if (!rows.length) return;
+    const breakdown = score.breakdown || {};
+    const bars = Object.entries(SCORE_LABELS)
+      .filter(([key]) => typeof breakdown[key] === 'number');
+    const reasons = (score.reasons || []).filter(Boolean);
 
-    this.h1(doc, ctx, 'How This Report Was Built',
-      40 + this.flowHeight(doc, rows[0][1], { size: 9, lineGap: 1.8 }));
+    if (!rows.length && !bars.length && !reasons.length) return;
+
+    this.h1(doc, ctx, 'How This Report Was Built', { follows: 40 });
     this.paragraph(doc, ctx, 'Every claim above was written against the profile below, frozen at the moment the report was generated. Editing the profile afterwards does not change this document.', {
-      size: 8.8,
+      size: 9,
       color: C.muted,
     });
 
-    rows.forEach(([label, value]) => {
-      const options = { size: 9, color: C.ink, lineGap: 1.8 };
+    // --- Score arithmetic ---
+    if (bars.length || reasons.length) {
+      this.h3(doc, ctx, 'Salesmotion Score Breakdown', {
+        follows: bars.length ? bars.length * 22 : this.listOpener(doc, reasons),
+      });
 
-      // A field name and its value are one row, never two halves
-      this.fitBlock(doc, ctx, 12 + this.flowHeight(doc, value, options));
+      const barWidth = 300;
+      bars.forEach(([key, label]) => {
+        this.ensure(doc, ctx, 24);
+        const value = Math.max(0, Math.min(100, Math.round(breakdown[key])));
+        const top = doc.y;
 
-      doc.font(F.bold).fontSize(7.4).fillColor(C.muted)
-        .text(label.toUpperCase(), this.colX(ctx), doc.y, {
-          width: COL_WIDTH,
-          characterSpacing: 0.6,
-        });
-      this.space(doc, 2);
+        doc.font(F.regular).fontSize(8).fillColor(C.muted)
+          .text(label.toUpperCase(), MARGIN, top, { width: barWidth - 30, characterSpacing: 0.5, lineBreak: false });
+        doc.font(F.bold).fontSize(8).fillColor(C.ink)
+          .text(String(value), MARGIN + barWidth - 30, top, { width: 30, align: 'right', lineBreak: false });
 
-      this.flow(doc, ctx, value, { ...options, anchored: true });
-      this.space(doc, 9);
-    });
+        const barY = top + 11;
+        doc.save();
+        doc.roundedRect(MARGIN, barY, barWidth, 4, 2).fill(C.track);
+        doc.roundedRect(MARGIN, barY, Math.max(2, barWidth * value / 100), 4, 2).fill(this.scoreColor(value));
+        doc.restore();
+
+        doc.y = barY + 13;
+      });
+
+      if (reasons.length) {
+        this.space(doc, 4);
+        this.bulletList(doc, ctx, reasons.map(text => ({ text })), { icon: 'dot', color: C.blue });
+      }
+    }
+
+    // --- Profile rows ---
+    if (rows.length) {
+      this.h3(doc, ctx, 'Report Profile', { follows: 24 });
+
+      rows.forEach(([label, value]) => {
+        const options = { size: 9.5, color: C.ink, indent: 0, lineGap: 2.2 };
+
+        // A field name and its value are one row, never two halves
+        this.fitBlock(doc, ctx, 13 + this.flowHeight(doc, value, options));
+
+        doc.font(F.bold).fontSize(7.6).fillColor(C.muted)
+          .text(label.toUpperCase(), MARGIN, doc.y, {
+            width: CONTENT_WIDTH,
+            characterSpacing: 0.6,
+          });
+        this.space(doc, 2.5);
+
+        this.writeText(doc, value, options);
+        this.space(doc, 10);
+      });
+    }
   }
 }
 

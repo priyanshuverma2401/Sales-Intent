@@ -129,7 +129,7 @@ backend/src/
     aiEngine.js            four batched JSON passes, all sharing the seller lens
     intelligenceService.js evidence → sources → normalise → report shape
     reportService.js       the "generate a report" use case, run in background
-    reportGenerator.js     A4-landscape PDF, two-column flow, contents, footnotes, quote cards
+    reportGenerator.js     A4-landscape PDF, full-width flow, outline icons, contents, footnotes, quote cards
     scoring.js             Salesmotion score
   routes/
     auth · organizations · companies · accounts · reports · signals · alerts · inbox
