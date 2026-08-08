@@ -235,63 +235,62 @@ class InfoboxFetcher {
   }
 
   /**
-   * @returns {Promise<object|null>} whatever the infobox states, or null.
-   *   Never throws — this is a supplementary source, not a required one.
+   * @returns {Promise<object|null>} whatever the infobox states, or null when
+   *   the article states nothing useful.
+   *
+   * Throws when the lookup could not be completed. "Wikipedia was throttling
+   * us" and "this article has no numbers in it" are different answers, and
+   * only the second one is safe for a caller to remember.
    */
   async fetch(companyName) {
     if (!companyName) return null;
 
-    try {
-      const data = await this.request({
-        action: 'query',
-        titles: companyName,
-        prop: 'revisions',
-        rvprop: 'content',
-        rvslots: 'main',
-        redirects: 1,
-        formatversion: 2,
-      });
+    const data = await this.request({
+      action: 'query',
+      titles: companyName,
+      prop: 'revisions',
+      rvprop: 'content',
+      rvslots: 'main',
+      redirects: 1,
+      formatversion: 2,
+    });
 
-      const page = data.query?.pages?.[0];
-      const wikitext = page?.revisions?.[0]?.slots?.main?.content;
-      if (!wikitext || page.missing) return null;
+    const page = data.query?.pages?.[0];
+    const wikitext = page?.revisions?.[0]?.slots?.main?.content;
+    if (!wikitext || page.missing) return null;
 
-      // Without a company infobox this is the wrong kind of article, and its
-      // "revenue" field - if any - is about something else entirely
-      const infobox = this.infobox(wikitext);
-      if (!infobox) return null;
+    // Without a company infobox this is the wrong kind of article, and its
+    // "revenue" field - if any - is about something else entirely
+    const infobox = this.infobox(wikitext);
+    if (!infobox) return null;
 
-      const revenue = this.parseAmount(this.field(infobox, 'revenue'));
-      const employees = this.parseCount(this.field(infobox, 'num_employees'));
-      const industry = this.clean(this.field(infobox, 'industry'))
-        // The field is often a list; the first entry is the primary industry
-        .split(/[,;]|\s{2,}/)[0]
-        .trim();
+    const revenue = this.parseAmount(this.field(infobox, 'revenue'));
+    const employees = this.parseCount(this.field(infobox, 'num_employees'));
+    const industry = this.clean(this.field(infobox, 'industry'))
+      // The field is often a list; the first entry is the primary industry
+      .split(/[,;]|\s{2,}/)[0]
+      .trim();
 
-      const facts = {
-        revenue: revenue?.value,
-        revenueCurrency: revenue?.currency || undefined,
-        revenueAsOf: revenue?.asOf || undefined,
-        employees: employees?.value,
-        employeesAsOf: employees?.asOf || undefined,
-        industry: industry || undefined,
-        website: this.parseWebsite(this.field(infobox, 'website')) || undefined,
-        source: 'Wikipedia infobox',
-      };
+    const facts = {
+      revenue: revenue?.value,
+      revenueCurrency: revenue?.currency || undefined,
+      revenueAsOf: revenue?.asOf || undefined,
+      employees: employees?.value,
+      employeesAsOf: employees?.asOf || undefined,
+      industry: industry || undefined,
+      website: this.parseWebsite(this.field(infobox, 'website')) || undefined,
+      source: 'Wikipedia infobox',
+    };
 
-      if (!facts.revenue && !facts.employees && !facts.website) return null;
+    if (!facts.revenue && !facts.employees && !facts.website) return null;
 
-      console.log(
-        `📘 Wikipedia infobox for ${companyName}: ` +
-        `${facts.revenue ? `${facts.revenueCurrency || ''}${facts.revenue} revenue` : 'no revenue'}, ` +
-        `${facts.employees ? `${facts.employees} staff` : 'no headcount'}`
-      );
+    console.log(
+      `📘 Wikipedia infobox for ${companyName}: ` +
+      `${facts.revenue ? `${facts.revenueCurrency || ''}${facts.revenue} revenue` : 'no revenue'}, ` +
+      `${facts.employees ? `${facts.employees} staff` : 'no headcount'}`
+    );
 
-      return facts;
-    } catch (error) {
-      console.error('❌ Wikipedia infobox error:', error.message);
-      return null;
-    }
+    return facts;
   }
 }
 

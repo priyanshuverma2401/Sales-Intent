@@ -811,7 +811,8 @@ class ReportGenerator {
       ['pin', facts.headquarters ? `Headquartered in ${facts.headquarters}` : null],
       ['building', facts.industry],
       ['chart', revenue ? `${revenue} revenue${facts.revenueAsOf ? ` (FY${facts.revenueAsOf})` : ''}` : null],
-      ['person', facts.employees ? `${Number(facts.employees).toLocaleString()} employees` : null],
+      // Headcount sits with the links, where the deck and the web report both
+      // put it - not here
       ['chart', this.money(facts.marketCap) ? `${this.money(facts.marketCap)} market cap` : null],
       ['calendar', facts.founded ? `Founded ${facts.founded}` : null],
     ].filter(([, value]) => value);
@@ -844,6 +845,19 @@ class ReportGenerator {
     const links = [...(report.quickLinks || [])];
     if (facts.website && !links.some(l => this.hostname(l.url) === this.hostname(facts.website))) {
       links.unshift({ label: this.hostname(facts.website), url: facts.website });
+    }
+
+    // Headcount is not a link, but the deck lists it here and so does the web
+    // report, so the two covers stay the same shape
+    if (facts.employees) {
+      const headcount = `${Number(facts.employees).toLocaleString()} employees`;
+      doc.font(F.regular).fontSize(9.5);
+      if (this.coverFits(cursor, doc.heightOfString(headcount, { width: width - 20, lineGap: 2 }))) {
+        this.drawIcon(doc, 'person', x, cursor - 0.5, 10.5, C.blue);
+        doc.font(F.regular).fontSize(9.5).fillColor(C.ink)
+          .text(headcount, x + 20, cursor, { width: width - 20, lineGap: 2 });
+        cursor = doc.y + 8;
+      }
     }
 
     for (const link of links.slice(0, 7)) {

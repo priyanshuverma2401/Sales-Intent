@@ -140,7 +140,12 @@ class CompanyDataFetcher {
       this.fetchFromCrunchbase(companyName),
       // Headcount, headquarters city and revenue come from nowhere else on a
       // keyless install, and the report cover is built out of exactly those.
-      firmographicsFetcher.fetch(companyName, ticker),
+      // A failure here must not sink the whole enrichment - `backfill` retries
+      // it when the report is generated.
+      firmographicsFetcher.fetch(companyName, ticker).catch(error => {
+        console.warn(`⚠️ Firmographics unavailable for ${companyName}: ${error.message}`);
+        return null;
+      }),
       // Finnhub carries industry / website / logo / country, which Wikipedia's
       // extract does not. Without this the stored company had a blank industry.
       ticker ? financialDataFetcher.getCompanyFundamentals(ticker) : Promise.resolve(null),
@@ -222,7 +227,18 @@ class CompanyDataFetcher {
     const daysSince = lastTried ? (Date.now() - new Date(lastTried)) / 86400000 : Infinity;
     if (!force && daysSince < 7) return false;
 
-    const facts = await firmographicsFetcher.fetch(company.name, company.ticker);
+    let facts;
+    try {
+      facts = await firmographicsFetcher.fetch(company.name, company.ticker);
+    } catch (error) {
+      // The lookup never completed - Wikidata and Wikipedia both throttle
+      // bursts, and adding an account fires one. Recording that as "empty"
+      // would start the cooldown below and leave the cover blank for a week
+      // over what is usually a few seconds of rate limiting, so nothing is
+      // written and the next report tries again.
+      console.warn(`⚠️ Firmographics lookup did not complete for ${company.name}: ${error.message}`);
+      return false;
+    }
 
     // Record the attempt either way, so a miss is not retried on every report
     if (!company.dataSources) company.dataSources = {};

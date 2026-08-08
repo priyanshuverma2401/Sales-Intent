@@ -208,18 +208,38 @@ class FirmographicsFetcher {
 
   /**
    * @returns {Promise<object|null>} firmographics from Wikidata and the
-   *   Wikipedia infobox, merged. Never throws: a lookup failure must not cost a
-   *   report, and either source alone is still worth putting on the cover.
+   *   Wikipedia infobox, merged, or null when neither source knows this
+   *   company. Either source alone is still worth putting on the cover, so one
+   *   of the two failing is not fatal.
+   *
+   * Throws only when *both* lookups failed to complete. A caller that cannot
+   * tell "no public record exists" from "both APIs were throttling us" will
+   * cache the throttling as an answer - which is exactly how an account ends up
+   * with a permanently blank cover.
    */
   async fetch(companyName, ticker) {
     if (!companyName) return null;
 
-    const [wikidata, infobox] = await Promise.all([
+    const [wikidata, infobox] = await Promise.allSettled([
       this.fromWikidata(companyName, ticker),
       infoboxFetcher.fetch(companyName),
     ]);
 
-    return this.merge(wikidata, infobox);
+    if (wikidata.status === 'rejected' && infobox.status === 'rejected') {
+      console.error(`❌ Firmographics lookup failed for ${companyName}: ${wikidata.reason?.message}`);
+      throw wikidata.reason;
+    }
+
+    for (const [source, result] of [['Wikidata', wikidata], ['Wikipedia infobox', infobox]]) {
+      if (result.status === 'rejected') {
+        console.warn(`⚠️ ${source} unavailable for ${companyName}: ${result.reason?.message}`);
+      }
+    }
+
+    return this.merge(
+      wikidata.status === 'fulfilled' ? wikidata.value : null,
+      infobox.status === 'fulfilled' ? infobox.value : null
+    );
   }
 
   /**
@@ -261,35 +281,31 @@ class FirmographicsFetcher {
     };
   }
 
+  /** Throws when the lookup fails; resolves null when nothing matches. */
   async fromWikidata(companyName, ticker) {
-    try {
-      const candidateIds = await this.search(companyName);
-      if (!candidateIds.length) return null;
+    const candidateIds = await this.search(companyName);
+    if (!candidateIds.length) return null;
 
-      const candidates = await this.entities(candidateIds, 'claims');
+    const candidates = await this.entities(candidateIds, 'claims');
 
-      let entity = null;
-      let bestScore = 0;
-      for (const candidate of Object.values(candidates)) {
-        const score = this.score(candidate, ticker);
-        if (score > bestScore) {
-          bestScore = score;
-          entity = candidate;
-        }
+    let entity = null;
+    let bestScore = 0;
+    for (const candidate of Object.values(candidates)) {
+      const score = this.score(candidate, ticker);
+      if (score > bestScore) {
+        bestScore = score;
+        entity = candidate;
       }
+    }
 
-      // Two company-shaped properties is the floor. Below that the match is a
-      // guess, and a wrong headcount on the cover is worse than a blank one.
-      if (!entity || bestScore < 2) {
-        console.log(`ℹ️ No confident Wikidata match for ${companyName}`);
-        return null;
-      }
-
-      return await this.extract(entity, companyName);
-    } catch (error) {
-      console.error('❌ Wikidata firmographics error:', error.message);
+    // Two company-shaped properties is the floor. Below that the match is a
+    // guess, and a wrong headcount on the cover is worse than a blank one.
+    if (!entity || bestScore < 2) {
+      console.log(`ℹ️ No confident Wikidata match for ${companyName}`);
       return null;
     }
+
+    return await this.extract(entity, companyName);
   }
 
   async extract(entity, companyName) {
