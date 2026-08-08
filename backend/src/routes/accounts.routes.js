@@ -2,6 +2,9 @@ const express = require('express');
 const User = require('../models/User');
 const Signal = require('../models/Signal');
 const Report = require('../models/Report');
+const Company = require('../models/Company');
+const accountTagging = require('../services/accountTagging');
+const jobDataFetcher = require('../services/dataFetchers/jobDataFetcher');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -82,8 +85,38 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// Personal notes on one account. What a report says is decided by the company
-// profile, so there is nothing per-account to steer.
+// A URL only counts if it is one we can actually fetch. A pasted search box or
+// a mistyped host would otherwise be recorded as the account's careers page and
+// silently return nothing on every report.
+function cleanUrl(value) {
+  if (value === undefined) return undefined;
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    return url.href;
+  } catch (_) {
+    return null;
+  }
+}
+
+const URL_FIELDS = [
+  'careersUrl', 'investorRelationsUrl', 'pressUrl', 'blogRssUrl',
+  'linkedInPeopleUrl', 'indeedUrl',
+];
+
+const FLAG_FIELDS = ['regulated', 'governmentFacing', 'rndHeavy'];
+
+/**
+ * Personal notes, plus the account settings that steer what gets crawled.
+ *
+ * The URLs and tags live on the shared Company record rather than on the
+ * watchlist entry: they are facts about the prospect, not one tenant's opinion
+ * of it, so whoever fills one in has done the work for every tenant watching
+ * the same account. Notes stay personal.
+ */
 router.patch('/:companyId', authenticate, async (req, res) => {
   try {
     const entry = (req.user.watchlist || []).find(
@@ -92,14 +125,86 @@ router.patch('/:companyId', authenticate, async (req, res) => {
 
     if (!entry) return res.status(404).json({ error: 'Account not in your list' });
 
-    if (req.body.notes !== undefined) entry.notes = req.body.notes;
+    if (req.body.notes !== undefined) {
+      entry.notes = req.body.notes;
+      await req.user.save();
+    }
 
-    await req.user.save();
+    const { pages, tags } = req.body;
+    if (!pages && !tags) {
+      return res.json({ message: 'Account updated', notes: entry.notes });
+    }
 
-    res.json({ message: 'Account updated', notes: entry.notes });
+    const company = await Company.findById(req.params.companyId);
+    if (!company) return res.status(404).json({ error: 'Company not found' });
+
+    if (pages) {
+      company.pages = company.pages || {};
+
+      for (const field of URL_FIELDS) {
+        if (pages[field] === undefined) continue;
+
+        const value = cleanUrl(pages[field]);
+        if (value === null) {
+          return res.status(400).json({ error: `${field} is not a valid URL` });
+        }
+        company.pages[field] = value || undefined;
+      }
+
+      // The careers URL is what makes Workday and iCIMS reachable at all, so a
+      // board we cannot read is worth saying out loud rather than discovering
+      // as an empty hiring line three reports later
+      if (pages.careersUrl && company.pages.careersUrl) {
+        const detected = jobDataFetcher.detectBoard(company.pages.careersUrl);
+        if (detected) {
+          console.log(`💼 ${company.name}: careers URL resolves to ${detected.board}`);
+        }
+      }
+    }
+
+    if (tags) {
+      company.tags = company.tags || {};
+
+      if (tags.vertical !== undefined) {
+        const value = String(tags.vertical || '').trim();
+        if (value && !accountTagging.VERTICALS[value]) {
+          return res.status(400).json({ error: `Unknown vertical "${value}"` });
+        }
+        company.tags.vertical = value || undefined;
+      }
+
+      for (const flag of FLAG_FIELDS) {
+        if (tags[flag] !== undefined) company.tags[flag] = Boolean(tags[flag]);
+      }
+
+      // A human has answered, so the auto-tagger must not overwrite it later
+      company.tags.autoTagged = false;
+    }
+
+    company.updatedAt = new Date();
+    await company.save();
+
+    res.json({
+      message: 'Account updated',
+      notes: entry.notes,
+      pages: company.pages,
+      tags: company.tags,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// The verticals the settings form offers, so the client never hard-codes a list
+// that can drift from the one the crawler actually understands
+router.get('/meta/verticals', authenticate, (req, res) => {
+  res.json(
+    Object.entries(accountTagging.VERTICALS).map(([value, spec]) => ({
+      value,
+      label: spec.label,
+      regulated: accountTagging.REGULATED_VERTICALS.has(value),
+    }))
+  );
 });
 
 module.exports = router;

@@ -244,10 +244,140 @@ Rules for using this:
   }
 
   /**
-   * The block every prompt shares. Repeating the lens in each call is what keeps
-   * a four-call report coherent instead of four unrelated essays.
+   * The records the pipeline extracted before the model was called.
+   *
+   * These are the report's load-bearing facts - a named programme, a dated
+   * executive move, a filed result, a counted set of open roles - and every one
+   * was read out of a primary source in code. The model is handed them as
+   * settled so it writes around them: it must lead with them, must not restate
+   * a figure differently, and must not invent a sibling for one.
+   *
+   * The alternative is asking a model to produce these itself, which produces a
+   * plausible programme name for an account that never announced one.
    */
-  buildContext({ seller, prospect, crm = null }) {
+  evidenceBlock(evidence = {}) {
+    const money = value => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+      if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+      return `$${n.toLocaleString()}`;
+    };
+
+    const day = value =>
+      value ? new Date(value).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'undated';
+
+    const blocks = [];
+
+    const programs = evidence.strategicPrograms || [];
+    if (programs.length) {
+      blocks.push(
+        `NAMED PROGRAMMES (highest-priority triggers - lead with these):\n` +
+        programs.slice(0, 4).map(p =>
+          `  - "${p.name}"${p.headlineNumber ? `, ${p.headlineNumber}` : ''}, announced ${day(p.announcedAt)}` +
+          `${p.citations?.length ? ` [${p.citations.join(', ')}]` : ''}`
+        ).join('\n')
+      );
+    }
+
+    const regulatory = evidence.regulatoryActions || [];
+    if (regulatory.length) {
+      blocks.push(
+        `REGULATORY ACTIONS (same priority tier as programmes - regulation creates\n` +
+        `obligation with a deadline, not merely opportunity):\n` +
+        regulatory.slice(0, 4).map(r =>
+          `  - ${r.regulator}, ${r.actionType}, ${day(r.announcedAt)}: ${(r.detail || '').slice(0, 160)}` +
+          `${r.citations?.length ? ` [${r.citations.join(', ')}]` : ''}`
+        ).join('\n')
+      );
+    }
+
+    const moves = evidence.executiveMoves || [];
+    if (moves.length) {
+      blocks.push(
+        `VERIFIED EXECUTIVE MOVES (already rendered in the report - do not list them\n` +
+        `again; write what they mean for budget ownership and timing):\n` +
+        moves.slice(0, 6).map(m =>
+          `  - ${m.person}${m.role ? `, ${m.role}` : ''}, ${m.movement}, ${day(m.announcedAt)}` +
+          `${m.counterparty ? `, from/to ${m.counterparty}` : ''}` +
+          `${m.citations?.length ? ` [${m.citations.join(', ')}]` : ''}`
+        ).join('\n')
+      );
+    }
+
+    const results = evidence.financial?.latestResults;
+    if (results && (results.revenue || results.profit || results.eps)) {
+      const parts = [
+        results.revenue ? `revenue ${money(results.revenue)}` : null,
+        results.profit ? `net income ${money(results.profit)}` : null,
+        Number.isFinite(results.eps) ? `diluted EPS $${Number(results.eps).toFixed(2)}` : null,
+        results.buybackAmount ? `buybacks ${money(results.buybackAmount)}` : null,
+      ].filter(Boolean).join(', ');
+
+      blocks.push(
+        `LATEST REPORTED RESULTS (filed figures - quote them exactly as written here,\n` +
+        `never round differently, never estimate a figure that is absent):\n` +
+        `  - ${results.period || 'latest period'}: ${parts}` +
+        `${results.citations?.length ? ` [${results.citations.join(', ')}]` : ''}`
+      );
+    }
+
+    if (evidence.hiring?.summary) {
+      blocks.push(
+        `HIRING (counted from the company's own job board - this exact sentence is\n` +
+        `already rendered; do not restate the number, build on what it implies):\n` +
+        `  - ${evidence.hiring.summary}` +
+        `${evidence.hiring.citations?.length ? ` [${evidence.hiring.citations.join(', ')}]` : ''}`
+      );
+    }
+
+    const patents = evidence.patents || [];
+    if (patents.length) {
+      blocks.push(
+        `PATENT ACTIVITY (R&D direction, months ahead of any announcement):\n` +
+        patents.slice(0, 5).map(p =>
+          `  - "${p.title}", ${p.status}, ${day(p.grantedAt || p.filedAt)}` +
+          `${p.citations?.length ? ` [${p.citations.join(', ')}]` : ''}`
+        ).join('\n')
+      );
+    }
+
+    const awards = evidence.contractAwards || [];
+    if (awards.length) {
+      blocks.push(
+        `US FEDERAL CONTRACT AWARDS (public record - dated, exact, not press spin):\n` +
+        awards.slice(0, 5).map(a =>
+          `  - ${money(a.amount) || 'undisclosed'}, ${a.agency}, from ${day(a.startedAt)}` +
+          `${a.citations?.length ? ` [${a.citations.join(', ')}]` : ''}`
+        ).join('\n')
+      );
+    }
+
+    if (!blocks.length) return '';
+
+    return `
+=== VERIFIED RECORDS (extracted from primary sources, NOT by you) ===
+Every line below was read out of a filing, a job board, a public register or a
+dated article. Treat all of it as settled fact.
+
+${blocks.join('\n\n')}
+
+Rules for using these:
+  - Lead with the named programmes and regulatory actions. They are the strongest
+    triggers in this report and belong at the top of Key Insights.
+  - At least one talking point must name a programme above verbatim and open on it.
+  - Never restate one of these figures with a different number, a different date
+    or a different name.
+  - Never invent a companion record - a second programme, another executive, a
+    figure for a quarter that is not listed. If it is not above and not in the
+    SOURCES, it does not exist for the purposes of this report.`.trim();
+  }
+
+  /**
+   * The block every prompt shares. Repeating the lens in each call is what keeps
+   * a multi-call report coherent instead of several unrelated essays.
+   */
+  buildContext({ seller, prospect, crm = null, evidence = null }) {
     const priority = (seller.priorityTopics || []).filter(Boolean);
     const standard = (seller.standardTopics || []).filter(Boolean);
     const focus = (seller.focusTerms || []).filter(Boolean);
@@ -298,6 +428,8 @@ About: ${(prospect.description || 'no description available').slice(0, 900)}
 Financials: market cap ${this.money(prospect.financials?.marketCap)}, revenue ${this.money(prospect.financials?.revenue)}, revenue growth ${prospect.financials?.revenueGrowth ?? 'n/a'}%, P/E ${prospect.financials?.peRatio ?? 'n/a'}
 
 ${this.crmBlock(crm, prospect.name)}
+
+${evidence ? this.evidenceBlock(evidence) : ''}
 `.trim();
   }
 
@@ -330,6 +462,8 @@ ${this.crmBlock(crm, prospect.name)}
     return `
 Every array element that carries a claim is an object: {"text": "...", "citations": [1, 4]}
 - "citations" holds SOURCE numbers from the SOURCES list. Use [] only when the claim comes from the company profile.
+- AT MOST 3 citations per claim, and only sources that genuinely support it. A longer source
+  list is not a licence to cite more: pick the strongest evidence, not all of it.
 - Each "text" is 55-85 words and runs to three or four complete sentences, in this order:
     1. the fact, with the figures, products, regions, executives and dates that make it specific;
     2. the scale or context that says how big a deal it is for a company this size;
@@ -363,7 +497,29 @@ Rules:
 - Enough detail that the rep can recall the whole point from a glance mid-meeting. Never a single sentence.
 - Do not restate a Key Insight verbatim - a talking point is the spoken version with the ask attached.
 - Each one opens a different door: no two may lead to the same question.
-- The first talking points belong to the high-priority topics named in the REPORT FOCUS above.`;
+- The first talking points belong to the high-priority topics named in the REPORT FOCUS above.
+- If the VERIFIED RECORDS list a named programme, at least one talking point must open on it
+  BY NAME - "Your May 2026 growth plan targets 15% RoTE - here is how we accelerate it."
+  A programme the prospect announced is the strongest opening line available to a rep.`;
+  }
+
+  /**
+   * The whitespace read - where the account is investing before it has said so.
+   *
+   * Patents and federal awards are dated public record, and they run months
+   * ahead of the announcement they belong to. That makes them the wrong thing
+   * to open a call with and the right thing to shape a roadmap around, so this
+   * pass is asked for direction rather than triggers.
+   */
+  get whitespaceRule() {
+    return `
+This section is about DIRECTION, not events. A patent is not a reason to call today -
+it is evidence of where the account will need capability in twelve months. Write it that way.
+- Ground every claim in a patent or award listed in the VERIFIED RECORDS. No record, no claim.
+- Say what the filing or award implies they are building, then what they will need to run it
+  at scale - the operational, data, compliance or staffing load that follows.
+- Never infer a product launch, a revenue figure or a customer from a patent. A filing means
+  they explored something, not that they shipped it.`;
   }
 
   // ---- report sections ---------------------------------------------------
@@ -382,11 +538,22 @@ Produce the "What You Need To Know" brief. Return JSON with exactly these keys:
   "keyInsights":     [7 items],   // the most important, decision-relevant developments, each tied to the report focus
   "opportunities":   [5 items],   // specific engagements the SELLER can pitch, naming the seller capability used and the outcome it buys
   "challenges":      [4 items],   // problems/risks the prospect faces that the seller's capabilities address, with the cost of leaving them unsolved
-  "peopleUpdates":   [3 items],   // leadership moves, hiring patterns and what they signal about budget/ownership
+  "peopleUpdates":   [3 items],   // what the leadership changes MEAN for budget ownership, decision timing and who to call - not a re-list of the moves
   "talkingPoints":   [5 objects], // see the TALKING POINT CONTRACT below - the longest section in the report
   "topNews":         [4 objects], // {"title","summary","source","url","publishedAt","citations":[n]} - real headlines from SOURCES only, "summary" 40-60 words
-  "executivePerspective": [3 objects] // {"quote","person","title","source","citations":[n]} - verbatim quotes found in SOURCES. If none exist, return []. NEVER fabricate a quote.
+  "executivePerspective": [3 objects] // see the QUOTE CONTRACT below. If nothing clears the bar, return []. NEVER fabricate a quote.
 }
+
+QUOTE CONTRACT (this section is dropped from the report entirely rather than shown weak):
+Each quote is {"quote","person","title","source","citations":[n]} and needs ALL of:
+  - "quote": the words verbatim from a SOURCE. Never paraphrase, never assemble one from a summary.
+  - "person": the speaker's actual name. "a spokesperson", "the CEO", "management" is a REJECT -
+    if the source does not name them, the quote cannot be used.
+  - "title": their role. A name with no job title tells the reader nothing about whether this
+    person controls the budget.
+  - "citations": the SOURCE the quote was read from - it supplies the date and the link.
+Prefer quotes connected to a named programme, a regulatory action or a trigger event above.
+Returning [] is a correct and expected answer. Three is the maximum; fewer is fine.
 ${this.citationRule}
 ${this.talkingPointRule}`;
 
@@ -445,6 +612,30 @@ Produce the "Business Model / Strategic Initiatives / Financials / SWOT" section
 ${this.citationRule}`;
 
     return this.completeJSON(prompt, { maxTokens: 6000, label: 'strategy' });
+  }
+
+  /** Whitespace Identification — R&D and public-sector direction. */
+  async generateWhitespace(context, sources, evidence = {}) {
+    const patents = (evidence.patents || []).length;
+    const awards = (evidence.contractAwards || []).length;
+
+    const prompt = `${context}
+
+=== SOURCES ===
+${this.buildSources(sources)}
+
+=== TASK ===
+Produce the "Whitespace Identification" section from the ${patents} patent record(s) and
+${awards} federal award(s) in the VERIFIED RECORDS above. Return JSON with exactly these keys:
+
+{
+  "insights":       [4 items],  // what the patent and contract activity says about where this account is heading, each naming the specific filing or award it reads from
+  "capabilityGaps": [3 items]   // the capability the account will need to operationalise that direction, and the opening it creates for the seller
+}
+${this.whitespaceRule}
+${this.citationRule}`;
+
+    return this.completeJSON(prompt, { maxTokens: 4000, label: 'whitespace' });
   }
 
   /** Page group 3 — the value story the rep actually pitches. */

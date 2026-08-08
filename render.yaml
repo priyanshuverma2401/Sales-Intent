@@ -74,6 +74,51 @@ services:
         sync: false
       - key: FINNHUB_API_KEY
         sync: false
+      # Earnings-call transcripts are a PAID Finnhub endpoint. Set to "true"
+      # only once the plan covers them; the code path stays dormant otherwise
+      # and everything else degrades gracefully without it.
+      - key: FINNHUB_PREMIUM
+        value: "false"
+
+      # Patents, for accounts tagged R&D-heavy. USPTO retired its keyless API;
+      # the replacement key is FREE, from developer.uspto.gov. Set either one.
+      # With neither, the patent block is simply absent - nothing is estimated.
+      - key: USPTO_API_KEY
+        sync: false
+      - key: PATENTSVIEW_API_KEY
+        sync: false
+
+      # Evidence crawl. One crawl per report and per nightly signal sweep, read
+      # by the sources list, the record extractors and the signals feed. Every
+      # source here is keyless; these only cap how much is fetched.
+      - key: MAX_CRAWL_ARTICLES
+        value: "100"
+      - key: MAX_NEWS_SOURCES
+        value: "30"
+      - key: MAX_JOB_SOURCES
+        value: "8"
+      - key: MAX_FILING_SOURCES
+        value: "5"
+      - key: MAX_PRESS_HOSTS
+        value: "6"
+      - key: MAX_REGULATOR_HOSTS
+        value: "4"
+      - key: CRAWL_WINDOW_DAYS
+        value: "90"
+      # Under this a report still generates, but says on its face that it was
+      # written thin rather than reading as confident as a well-sourced one
+      - key: THIN_COVERAGE_FLOOR
+        value: "15"
+
+      # Nightly signal sweep. Reports stay on demand; only signals refresh on
+      # their own. In-process, so a sweep fires only while an instance is awake
+      # - the boot run is what catches up after the host idles it to sleep.
+      - key: SIGNAL_SWEEP_INTERVAL_MS
+        value: "86400000"
+      - key: SIGNAL_SWEEP_BOOT_DELAY_MS
+        value: "120000"
+      - key: SIGNAL_MAX_AI_PER_COMPANY
+        value: "10"
 
       # Company suggestions in "Add an account". Leave blank and the search box
       # falls back to Wikipedia/Wikidata alone.

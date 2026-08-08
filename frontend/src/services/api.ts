@@ -179,11 +179,37 @@ export const companiesAPI = {
   refreshData: (id: string) => API.post(`/companies/${id}/refresh`),
 };
 
+// The pages a crawl reads directly. Each is optional and none is ever guessed:
+// a wrong careers URL yields another company's headcount.
+export interface AccountPages {
+  careersUrl?: string;
+  investorRelationsUrl?: string;
+  pressUrl?: string;
+  blogRssUrl?: string;
+  linkedInPeopleUrl?: string;
+  indeedUrl?: string;
+}
+
+// Which of the vertical, regulator, patent and contract crawls run for this
+// account. Guessed from the industry on add, corrected here.
+export interface AccountTags {
+  vertical?: string;
+  regulated?: boolean;
+  governmentFacing?: boolean;
+  rndHeavy?: boolean;
+  autoTagged?: boolean;
+}
+
 export const accountsAPI = {
   // Search runs server-side, like every other list in the API
   getAccounts: (params?: { q?: string }) => API.get('/accounts', { params }),
-  update: (companyId: string, data: { notes?: string }) =>
-    API.patch(`/accounts/${companyId}`, data),
+  update: (
+    companyId: string,
+    data: { notes?: string; pages?: AccountPages; tags?: AccountTags }
+  ) => API.patch(`/accounts/${companyId}`, data),
+  // Served by the API so the client never hard-codes a vertical list that can
+  // drift from the one the crawler actually understands
+  getVerticals: () => API.get('/accounts/meta/verticals'),
 };
 
 export const signalsAPI = {

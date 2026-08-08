@@ -1,15 +1,13 @@
 const express = require('express');
 const Company = require('../models/Company');
-const Signal = require('../models/Signal');
 const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
-const newsDataFetcher = require('../services/dataFetchers/newsDataFetcher');
-const financialDataFetcher = require('../services/dataFetchers/financialDataFetcher');
 const companyDataFetcher = require('../services/dataFetchers/companyDataFetcher');
+const financialDataFetcher = require('../services/dataFetchers/financialDataFetcher');
+const accountTagging = require('../services/accountTagging');
 const logoDevFetcher = require('../services/dataFetchers/logoDevFetcher');
 const brandfetchFetcher = require('../services/dataFetchers/brandfetchFetcher');
-const jobDataFetcher = require('../services/dataFetchers/jobDataFetcher');
-const aiEngine = require('../services/aiEngine');
+const signalService = require('../services/signalService');
 const reportService = require('../services/reportService');
 
 const router = express.Router();
@@ -46,29 +44,8 @@ function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Classify a news item so signals are not all filed as generic 'news'
-function classifySignal(article) {
-  const text = `${article.title || ''} ${article.description || ''}`.toLowerCase();
-
-  const rules = [
-    { type: 'earnings', priority: 'high', words: ['earnings', 'quarterly results', 'revenue beat', 'q1 ', 'q2 ', 'q3 ', 'q4 ', 'fiscal year'] },
-    { type: 'ma', priority: 'high', words: ['acquire', 'acquisition', 'merger', 'buyout', 'takeover'] },
-    { type: 'funding', priority: 'high', words: ['funding', 'raises', 'series a', 'series b', 'series c', 'investment round', 'valuation'] },
-    { type: 'executive', priority: 'high', words: ['ceo', 'cfo', 'cto', 'appointed', 'steps down', 'resigns', 'named president'] },
-    { type: 'hiring', priority: 'medium', words: ['hiring', 'layoff', 'job cuts', 'headcount', 'expands team', 'recruit'] },
-    { type: 'partnership', priority: 'medium', words: ['partnership', 'partners with', 'collaboration', 'teams up', 'alliance'] },
-    { type: 'regulation', priority: 'high', words: ['lawsuit', 'regulator', 'antitrust', 'investigation', 'fine', 'compliance'] },
-    { type: 'product', priority: 'medium', words: ['launch', 'unveils', 'releases', 'introduces', 'new product'] },
-  ];
-
-  for (const rule of rules) {
-    if (rule.words.some(word => text.includes(word))) {
-      return { type: rule.type, priority: rule.priority };
-    }
-  }
-
-  return { type: 'news', priority: 'medium' };
-}
+// News classification now lives in signalService, alongside the extraction and
+// filing it feeds - see signalService.classifySignal.
 
 // Search companies
 router.get('/search', authenticate, async (req, res) => {
@@ -204,6 +181,13 @@ router.post('/', authenticate, async (req, res) => {
           lastUpdated: new Date(),
         },
         stock: { ...stock, lastUpdated: new Date() },
+        // Guessed from the industry so the vertical trade press, regulator,
+        // patent and contract crawls work from the first report. Whoever knows
+        // better corrects it in Account settings, and that answer then sticks.
+        tags: accountTagging.derive({
+          industry: companyInfo.industry,
+          description: companyInfo.description,
+        }),
         addedBy: req.user._id,
         dataSources: {
           wikipedia: { lastFetched: new Date(), status: 'success' },
@@ -327,11 +311,12 @@ router.post('/:id/refresh', authenticate, async (req, res) => {
       ...(seller.standardTopics || []),
     ].filter(Boolean);
 
-    const [news, financial, jobs] = await Promise.all([
-      newsDataFetcher.fetchNews(company.name, company.ticker, keywords),
-      company.ticker ? financialDataFetcher.fetchFinancialData(company.ticker) : Promise.resolve({}),
-      jobDataFetcher.fetchJobData(company.name),
-    ]);
+    // The crawl, the extraction and the filing all live in signalService, so
+    // pressing Refresh produces exactly what the nightly sweep would have
+    // produced on its own - the button is a way to not wait, not a second
+    // implementation that can drift from the first.
+    const result = await signalService.refreshCompany(company, keywords);
+    const { financial, jobs } = result;
 
     const { stock, financials } = splitFinancialPayload(financial);
 
@@ -368,65 +353,13 @@ router.post('/:id/refresh', authenticate, async (req, res) => {
     company.updatedAt = new Date();
     await company.save();
 
-    // Turn the freshest news into signals, skipping ones already stored
-    let created = 0;
-    for (const item of news.slice(0, 5)) {
-      if (!item.title) continue;
-
-      const existingSignal = await Signal.findOne({
-        companyId: company._id,
-        title: item.title,
-      });
-      if (existingSignal) continue;
-
-      const { type, priority } = classifySignal(item);
-
-      const signal = new Signal({
-        companyId: company._id,
-        companyName: company.name,
-        ticker: company.ticker,
-        type,
-        priority,
-        title: item.title,
-        description: item.description,
-        source: item.source?.name,
-        sourceUrl: item.url,
-        publishedAt: item.publishedAt,
-      });
-
-      const analysis = await aiEngine.analyzeSignal(item, { company: company.name, keywords });
-      signal.aiAnalysis = { summary: analysis, generatedAt: new Date() };
-
-      await signal.save();
-      created += 1;
-    }
-
-    // Hiring/executive moves detected in the same news batch
-    const appointments = jobDataFetcher.parseExecutiveAppointments(news);
-    for (const appointment of appointments.slice(0, 3)) {
-      const existing = await Signal.findOne({ companyId: company._id, title: appointment.title });
-      if (existing) continue;
-
-      await new Signal({
-        companyId: company._id,
-        companyName: company.name,
-        ticker: company.ticker,
-        type: 'executive',
-        priority: 'high',
-        title: appointment.title,
-        description: appointment.description,
-        source: appointment.source?.name || appointment.source,
-        sourceUrl: appointment.url,
-        publishedAt: appointment.date,
-      }).save();
-      created += 1;
-    }
-
     res.json({
       message: 'Data refreshed successfully',
-      newsFound: news.length,
-      signalsCreated: created,
-      jobsFound: jobs.openPositions?.length || 0,
+      newsFound: result.newsFound,
+      signalsCreated: result.created,
+      jobsFound: result.jobsFound,
+      patentsFound: result.patentsFound,
+      awardsFound: result.awardsFound,
     });
   } catch (error) {
     console.error('Refresh error:', error);

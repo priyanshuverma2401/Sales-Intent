@@ -15,6 +15,7 @@ const mongoose = require('mongoose');
 const { initSupabase, verifySupabase, getSupabase } = require('./config/supabase');
 const aiProviders = require('./services/providers');
 const reportSweeper = require('./services/reportSweeper');
+const signalScheduler = require('./services/signalScheduler');
 
 const app = express();
 
@@ -166,6 +167,9 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('✅ MongoDB connected');
     // Clears reports the previous instance was generating when it was replaced.
     reportSweeper.start();
+    // Keeps the signals feed moving without anybody pressing Refresh. Reports
+    // stay on demand - this only files signals.
+    signalScheduler.start();
   })
   .catch((err) => {
     // Previously this only logged, leaving the instance serving 500s from every
@@ -276,6 +280,7 @@ function shutdown(signal) {
 
   console.log(`\n${signal} received — shutting down gracefully…`);
   reportSweeper.stop();
+  signalScheduler.stop();
 
   server.close(async () => {
     try {

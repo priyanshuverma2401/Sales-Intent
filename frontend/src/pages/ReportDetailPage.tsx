@@ -23,10 +23,18 @@ import {
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
 import { Alert, Button, Card, ProgressBar, ScoreRing, Spinner, cx } from '../components/ui';
 import {
+  ContractBlock,
+  CoverageWarning,
+  HiringBlock,
   InsightList,
   NewsList,
+  PatentBlock,
+  PeopleBlock,
+  ProgramBlock,
   QuoteCard,
+  RegulatoryBlock,
   ReportSection,
+  ResultsBlock,
   SourcesList,
   SubSection,
   TalkingPointList,
@@ -265,6 +273,11 @@ export default function ReportDetailPage() {
   const brief = report.executiveBrief || {};
   const research = report.research || {};
   const value = report.value || {};
+  // Records extracted server-side from primary sources. Reports generated
+  // before this existed have none, and every block handles that by rendering
+  // nothing rather than an empty shell.
+  const evidence = report.evidence || {};
+  const whitespace = report.whitespace || {};
 
   // ------------------------------------------------------------------ states
   if (report.status === 'pending') {
@@ -589,11 +602,25 @@ export default function ReportDetailPage() {
       <div className="space-y-5">
         <Chapter {...CHAPTERS[0]} />
 
+        {/* Before anything it qualifies. A reader who has absorbed six insights
+            before being told the report ran on nine sources has been misled by
+            the ordering alone. */}
+        <CoverageWarning coverage={report.coverage} />
+
         <ReportSection
           id="key-insights"
           title="Key insights"
           description="The things that matter most for your pitch."
         >
+          {/* Verified records first, in trigger order. Programmes and
+              regulatory actions share the top tier: both are dated commitments
+              the account has made, and both are openings a rep can use. */}
+          <ProgramBlock programs={evidence.strategicPrograms} sources={sources} />
+          <RegulatoryBlock actions={evidence.regulatoryActions} sources={sources} />
+          <ContractBlock awards={evidence.contractAwards} sources={sources} compact />
+          <ResultsBlock results={evidence.latestResults} sources={sources} />
+          <HiringBlock hiring={evidence.hiring} sources={sources} />
+
           <InsightList items={brief.keyInsights} sources={sources} tone="amber" />
         </ReportSection>
 
@@ -607,8 +634,16 @@ export default function ReportDetailPage() {
           </ReportSection>
         </div>
 
+        {/* Verified moves, newest first, then what the model reads into them.
+            This section never says "no specific executives mentioned" - it
+            either lists the people or states plainly there were none. */}
         <ReportSection id="people" title="Who is moving">
-          <InsightList items={brief.peopleUpdates} sources={sources} tone="purple" />
+          <PeopleBlock moves={evidence.executiveMoves} sources={sources} />
+          {brief.peopleUpdates?.length ? (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <InsightList items={brief.peopleUpdates} sources={sources} tone="purple" />
+            </div>
+          ) : null}
         </ReportSection>
 
         <ReportSection id="news" title="Recent news">
@@ -705,6 +740,41 @@ export default function ReportDetailPage() {
               <InsightList items={research.swot?.threats} sources={sources} tone="amber" />
             </SubSection>
           </div>
+        </ReportSection>
+
+        {/* Patents and federal awards are dated public record, filed months
+            before the programme they belong to is announced. That makes them
+            the wrong thing to open a call with and the right thing to shape a
+            roadmap around - hence direction here, triggers in Key insights. */}
+        <ReportSection
+          id="whitespace"
+          title="Whitespace"
+          description="R&D and public-sector activity on the public record — where this account is investing before it has announced anything."
+        >
+          <PatentBlock patents={evidence.patents} sources={sources} />
+          <ContractBlock awards={evidence.contractAwards} sources={sources} />
+
+          {whitespace.insights?.length ? (
+            <SubSection title="What this points to" tone="teal">
+              <InsightList items={whitespace.insights} sources={sources} tone="teal" />
+            </SubSection>
+          ) : null}
+
+          {whitespace.capabilityGaps?.length ? (
+            <SubSection title="Capability gaps it opens" tone="green">
+              <InsightList items={whitespace.capabilityGaps} sources={sources} tone="green" />
+            </SubSection>
+          ) : null}
+
+          {!evidence.patents?.length &&
+          !evidence.contractAwards?.length &&
+          !whitespace.insights?.length &&
+          !whitespace.capabilityGaps?.length ? (
+            <p className="text-[13px] italic text-ink-faint">
+              No patent filings or US federal contract awards are on record for this account.
+              These crawls run only for accounts tagged as R&amp;D-heavy or government-facing.
+            </p>
+          ) : null}
         </ReportSection>
 
         <Chapter {...CHAPTERS[2]} />

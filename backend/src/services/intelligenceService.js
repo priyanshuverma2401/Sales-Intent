@@ -1,25 +1,63 @@
 const aiEngine = require('./aiEngine');
 const { scoreAccount } = require('./scoring');
-const newsDataFetcher = require('./dataFetchers/newsDataFetcher');
+const crawlService = require('./dataFetchers/crawlService');
 const financialDataFetcher = require('./dataFetchers/financialDataFetcher');
 const jobDataFetcher = require('./dataFetchers/jobDataFetcher');
+const patentFetcher = require('./dataFetchers/patentFetcher');
+const contractFetcher = require('./dataFetchers/contractFetcher');
+const executiveMoves = require('./extractors/executiveMoves');
+const strategicPrograms = require('./extractors/strategicPrograms');
+const regulatoryActions = require('./extractors/regulatoryActions');
 
 // The source block is repeated verbatim in every AI pass, so its length is the
 // single biggest driver of prompt size. On Groq's free tier (12k tokens/min) a
 // full-length list made one request larger than the whole per-minute budget.
 //
-// These defaults stay tight because they also govern the Groq fallback, whose
-// free tier cannot take a full list. Every one is an env var: raise them in
-// .env now that Azure serves the primary traffic with a 272k input window.
-// Measured supply for a large-cap prospect is ~33 relevant articles, 5 filings
-// with extracted text, and 0-800 open roles, so 30 / 10 / 5 is not aspirational.
-// Pre-limit values were 26 / 8 / 4, with SOURCE_BODY_CHARS at 320.
-const MAX_NEWS_SOURCES = Number(process.env.MAX_NEWS_SOURCES) || 8;
-const MAX_JOB_SOURCES = Number(process.env.MAX_JOB_SOURCES) || 3;
-const MAX_FILING_SOURCES = Number(process.env.MAX_FILING_SOURCES) || 2;
+// These are sized for Azure's 272k input window, which serves the primary
+// traffic. Groq stays configured as insurance and will refuse the largest
+// reports; that is the intended trade, not a regression.
+const MAX_NEWS_SOURCES = Number(process.env.MAX_NEWS_SOURCES) || 30;
+const MAX_JOB_SOURCES = Number(process.env.MAX_JOB_SOURCES) || 8;
+const MAX_FILING_SOURCES = Number(process.env.MAX_FILING_SOURCES) || 5;
+const MAX_PATENT_SOURCES = Number(process.env.MAX_PATENT_SOURCES) || 6;
+const MAX_CONTRACT_SOURCES = Number(process.env.MAX_CONTRACT_SOURCES) || 6;
+const MAX_TRANSCRIPT_SOURCES = Number(process.env.MAX_TRANSCRIPT_SOURCES) || 2;
 
-// Orchestrates one report: gather evidence -> number the sources -> score the
-// account -> run the four AI passes -> normalise everything into the Report shape.
+// Below this the report is still written, but it says on its face that it was
+// written thin rather than reading as though the evidence were there.
+const THIN_COVERAGE_FLOOR = Number(process.env.THIN_COVERAGE_FLOOR) || 15;
+
+// More sources must not become more citations per claim. Three is enough to
+// show a claim is corroborated; beyond that the chips are noise.
+const MAX_CITATIONS_PER_CLAIM = 3;
+
+/**
+ * Why a source is in the report.
+ *
+ * Shown against the entry in the reference list and on hovering a citation
+ * chip, so a reader can tell whether a claim rests on a filed number or on a
+ * press mention without opening anything.
+ */
+const CITATION_REASONS = {
+  financial: 'Financial snapshot',
+  earnings: 'Reported results',
+  filing: 'Regulatory filing',
+  transcript: 'Earnings call',
+  program: 'Strategic programme',
+  regulatory: 'Regulatory action',
+  people: 'Leadership change',
+  hiring: 'Hiring activity',
+  job: 'Open role',
+  patent: 'Patent record',
+  contract: 'Federal contract',
+  partnership: 'Partnership / deal',
+  restructuring: 'Restructuring',
+  news: 'News coverage',
+};
+
+// Orchestrates one report: gather evidence -> extract the verifiable records ->
+// number the sources -> score the account -> run the AI passes -> normalise
+// everything into the Report shape.
 class IntelligenceService {
   // ---- normalisation -----------------------------------------------------
 
@@ -83,18 +121,23 @@ class IntelligenceService {
   }
 
   /**
-   * The quote section is the one place the model is told to return nothing when
-   * it finds nothing - and the one place it reliably ignores that, emitting
-   * "No verbatim quotes are available" as if it were a quote. Those, and any
-   * quote without a named speaker or repeated verbatim, are dropped: a fake
-   * quote in a client-facing brief is worse than an absent section.
+   * Executive quotes, held to the standard a client-facing brief needs.
+   *
+   * A quote must name who said it, what their job is, when they said it and
+   * where it was published. "A spokesperson said" is not attribution, and a
+   * competitor's brief printing exactly that is what this bar exists to avoid.
+   *
+   * The model is told to return nothing when it finds nothing, and this is the
+   * one place it reliably ignores that - emitting "No verbatim quotes are
+   * available" as if it were a quote. Those go too.
    */
-  cleanQuotes(value) {
+  cleanQuotes(value, sources = []) {
     const REFUSALS = [
       'no verbatim', 'no quote', 'no direct quote', 'not available', 'none available',
       'no executive', 'could not find', 'unavailable', 'no statements', 'n/a',
     ];
 
+    const byIndex = new Map(sources.map(s => [s.index, s]));
     const seen = new Set();
 
     return (Array.isArray(value) ? value : [])
@@ -112,18 +155,35 @@ class IntelligenceService {
 
         const person = typeof q === 'object' ? String(q.person || '').trim() : '';
         // A quote nobody said is not evidence
-        if (!person || /^(company )?(spokesperson|executive|unknown|n\/a)$/i.test(person)) return null;
+        if (!person || /^(company )?(spokesperson|executive|unknown|n\/a|ceo|cfo|cto|management)$/i.test(person)) {
+          return null;
+        }
+
+        const title = (typeof q === 'object' && String(q.title || '').trim()) || '';
+        // Without a title the reader cannot tell whether this is the person who
+        // owns the budget or someone three levels away from it
+        if (!title) return null;
+
+        const citations = this.toCitations(typeof q === 'object' ? q.citations : []);
+        const cited = citations.map(i => byIndex.get(i)).find(Boolean);
+
+        // The date and the link both come off the cited source rather than the
+        // model, so neither can be invented. No citation, no quote.
+        if (!cited?.url) return null;
 
         return {
           quote,
           person,
-          title: (typeof q === 'object' && q.title) || '',
-          source: (typeof q === 'object' && q.source) || '',
-          citations: this.toCitations(typeof q === 'object' ? q.citations : []),
+          title,
+          source: (typeof q === 'object' && q.source) || cited.source || '',
+          url: cited.url,
+          publishedAt: cited.publishedAt,
+          citations,
         };
       })
       .filter(Boolean)
-      .slice(0, 4);
+      // Three is the cap. A fourth quote is never the reason a deal moves.
+      .slice(0, 3);
   }
 
   toCitations(value) {
@@ -131,28 +191,55 @@ class IntelligenceService {
     return value
       .map(n => Number(n))
       .filter(n => Number.isInteger(n) && n > 0)
-      .slice(0, 6);
+      .slice(0, MAX_CITATIONS_PER_CLAIM);
   }
 
   // ---- evidence gathering ------------------------------------------------
 
+  /**
+   * One crawl, then everything else in parallel against it.
+   *
+   * The extractors are passes over articles already in memory, so adding
+   * executive moves, programmes and regulatory actions to the report costs no
+   * additional requests - only the patent and contract lookups reach out, and
+   * both are gated on the account's tags.
+   */
   async gather(company, keywords) {
-    const [news, financial, jobsData] = await Promise.all([
-      newsDataFetcher.fetchNews(company.name, company.ticker, keywords).catch(() => []),
-      company.ticker
-        ? financialDataFetcher.fetchFinancialData(company.ticker).catch(() => ({}))
+    const [crawl, financial, jobsData, patents, contractAwards] = await Promise.all([
+      crawlService.crawl(company, keywords).catch(error => {
+        console.error('❌ Crawl failed:', error.message);
+        return { articles: [], stats: {} };
+      }),
+      company.ticker || company.pages?.investorRelationsUrl
+        ? financialDataFetcher.fetchFinancialData(company.ticker, company).catch(() => ({}))
         : Promise.resolve({}),
       // Keywords rank the roles, not filter them: a board can return 800
       // postings and only a handful reach the prompt, so the ones that argue
       // the seller's case have to sort to the top.
-      jobDataFetcher.fetchJobData(company.name, keywords).catch(() => ({ openPositions: [] })),
+      jobDataFetcher.fetchJobData(company, keywords).catch(() => ({ openPositions: [], hiring: null })),
+      patentFetcher.fetchPatents(company).catch(() => []),
+      contractFetcher.fetchAwards(company).catch(() => []),
     ]);
+
+    const news = crawl.articles;
 
     return {
       news,
+      crawlStats: crawl.stats,
       financial: financial || {},
       jobs: jobsData?.openPositions || [],
-      executiveMoves: jobDataFetcher.parseExecutiveAppointments(news),
+      hiring: jobsData?.hiring || null,
+      patents,
+      contractAwards,
+
+      // Extracted in code from the crawl above. Every record here is checkable:
+      // it names a person, a programme or a regulator, carries a date, and
+      // points at the article it was read from.
+      executiveMoves: executiveMoves.extract(news, company),
+      strategicPrograms: strategicPrograms.extract(news, company),
+      regulatoryActions: regulatoryActions.extract(news, company),
+
+      // Kept for the scoring model, which reads headlines rather than records
       hiringSignals: jobDataFetcher.fetchHiringSignals(news),
     };
   }
@@ -177,10 +264,6 @@ class IntelligenceService {
     return Boolean(ticker && ticker.length >= 3 && text.includes(ticker));
   }
 
-  /**
-   * Build the numbered source list the AI cites against.
-   * Keyword-matched articles are ranked first so the model reaches for them.
-   */
   /**
    * The company's own numbers, as one citable source.
    *
@@ -231,67 +314,163 @@ class IntelligenceService {
       source: 'Finnhub / Yahoo Finance',
       publishedAt: financial.timestamp ? new Date(financial.timestamp) : new Date(),
       type: 'financial',
+      reason: 'financial',
     };
   }
 
-  buildSources({ news, jobs, financial }, company = {}) {
+  /** The filed results, as their own source, so the results block can cite them. */
+  resultsSource(financial = {}, company = {}) {
+    const results = financial.latestResults;
+    if (!results || (!results.revenue && !results.profit && !results.eps)) return null;
+
+    const money = value => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+      if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+      return `$${n.toLocaleString()}`;
+    };
+
+    const parts = [
+      ['Revenue', money(results.revenue)],
+      ['Net income', money(results.profit)],
+      ['Diluted EPS', Number.isFinite(results.eps) ? `$${Number(results.eps).toFixed(2)}` : null],
+      ['Share buybacks', money(results.buybackAmount)],
+      ['Dividend per share',
+        Number.isFinite(results.dividendPerShare) ? `$${Number(results.dividendPerShare).toFixed(2)}` : null],
+    ].filter(([, value]) => value);
+
+    if (!parts.length) return null;
+
+    return {
+      title: `${results.period || 'Latest'} reported results — ${company.name}`,
+      description: parts.map(([label, value]) => `${label}: ${value}`).join('; '),
+      url: results.url,
+      source: results.source || 'SEC EDGAR',
+      publishedAt: results.filedAt || results.periodEndedAt,
+      type: 'filing',
+      reason: 'earnings',
+    };
+  }
+
+  /**
+   * Build the numbered source list the AI cites against.
+   *
+   * Ordered by what the report leads with, not by where it came from. The
+   * articles behind an extracted record are placed before general coverage so
+   * that every verified record is guaranteed a citation - a programme the
+   * report pins at the top of Key Insights cannot be the one claim with no
+   * number next to it.
+   */
+  buildSources(evidence, company = {}) {
     const sources = [];
     let index = 1;
 
-    // First, so it is always [1]: the model reaches for low-numbered sources,
-    // and every other claim reads better anchored to the company's own figures.
-    const snapshot = this.financialSource(financial, company);
-    if (snapshot) sources.push({ ...snapshot, index: index++ });
+    const add = source => {
+      if (!source) return null;
+      const entry = { ...source, index };
+      sources.push(entry);
+      index += 1;
+      return entry;
+    };
 
-    const relevant = news.filter(n => this.isRelevant(n, company));
+    // First, so they are the lowest numbers: the model reaches for those, and
+    // every other claim reads better anchored to the company's own figures.
+    add(this.financialSource(evidence.financial, company));
+    add(this.resultsSource(evidence.financial, company));
+
+    // Articles behind a verified record, pinned and back-linked. The record
+    // carries the source number it was given, which is how the renderers put a
+    // citation on a line the model never wrote.
+    const seenUrls = new Set(sources.map(s => s.url).filter(Boolean));
+
+    const pin = (records, reason) => {
+      records.forEach(record => {
+        const article = record._article;
+        if (!article?.url) return;
+
+        const existing = sources.find(s => s.url === article.url);
+        if (existing) {
+          record.citations = [existing.index];
+          return;
+        }
+
+        const entry = add({
+          title: article.title,
+          description: article.description,
+          url: article.url,
+          source: article.publisher || 'News',
+          publishedAt: article.publishedAt ? new Date(article.publishedAt) : undefined,
+          type: 'news',
+          reason,
+          originalPublisher: article.alsoCarriedBy?.length ? article.publisher : undefined,
+        });
+
+        record.citations = [entry.index];
+        seenUrls.add(article.url);
+      });
+    };
+
+    pin(evidence.strategicPrograms || [], 'program');
+    pin(evidence.regulatoryActions || [], 'regulatory');
+    pin(evidence.executiveMoves || [], 'people');
+
+    // The rest of the coverage. Keyword-matched articles rank first so the
+    // model reaches for what the seller is actually pitching.
+    const relevant = evidence.news.filter(n => this.isRelevant(n, company));
     // If the filter is too aggressive for an obscure name, fall back to the raw
     // feed rather than handing the model nothing to work with
-    const pool = relevant.length >= 5 ? relevant : news;
+    const pool = relevant.length >= 5 ? relevant : evidence.news;
 
-    if (relevant.length < news.length) {
-      console.log(`🔎 Dropped ${news.length - relevant.length} off-topic articles of ${news.length}`);
+    if (relevant.length < evidence.news.length) {
+      console.log(`🔎 Dropped ${evidence.news.length - relevant.length} off-topic articles of ${evidence.news.length}`);
     }
 
-    const keywordMatched = pool.filter(n => n.matchedKeyword);
-    const rest = pool.filter(n => !n.matchedKeyword);
-
     const byRecency = (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0);
+    const remaining = pool.filter(article => article.url && !seenUrls.has(article.url));
 
-    [...keywordMatched.sort(byRecency), ...rest.sort(byRecency)]
+    [...remaining.filter(n => n.matchedKeyword).sort(byRecency),
+     ...remaining.filter(n => !n.matchedKeyword).sort(byRecency)]
       .slice(0, MAX_NEWS_SOURCES)
       .forEach(article => {
         if (!article.title) return;
-        sources.push({
-          index: index++,
+        add({
           title: article.matchedKeyword
             ? `${article.title}  [matches: ${article.matchedKeyword}]`
             : article.title,
           description: article.description,
           url: article.url,
-          source: article.source?.name || article.source || 'News',
+          source: article.publisher || 'News',
           publishedAt: article.publishedAt ? new Date(article.publishedAt) : undefined,
           type: 'news',
+          reason: CITATION_REASONS[article.reason] ? article.reason : 'news',
+          originalPublisher: article.alsoCarriedBy?.length ? article.publisher : undefined,
         });
       });
 
     // Already ranked by the fetcher, keyword-matching roles first
-    jobs.slice(0, MAX_JOB_SOURCES).forEach(job => {
+    (evidence.jobs || []).slice(0, MAX_JOB_SOURCES).forEach(job => {
       if (!job.title) return;
       const label = `${job.title}${job.location ? ` — ${job.location}` : ''}`;
-      sources.push({
-        index: index++,
+      add({
         title: `Open role: ${label}${job.matchedKeyword ? `  [matches: ${job.matchedKeyword}]` : ''}`,
         description: job.description,
         url: job.url,
         source: job.source || 'Jobs',
         publishedAt: job.postedAt ? new Date(job.postedAt) : undefined,
         type: 'job',
+        reason: 'job',
       });
     });
 
-    (financial.secFilings || []).slice(0, MAX_FILING_SOURCES).forEach(filing => {
-      sources.push({
-        index: index++,
+    // The hiring line cites whichever roles made it into the list
+    const jobSources = sources.filter(s => s.type === 'job').map(s => s.index);
+    if (evidence.hiring && jobSources.length) {
+      evidence.hiring.citations = jobSources.slice(0, MAX_CITATIONS_PER_CLAIM);
+    }
+
+    (evidence.financial.secFilings || []).slice(0, MAX_FILING_SOURCES).forEach(filing => {
+      add({
         title: `SEC filing ${filing.type || ''} ${filing.date || ''}`.trim(),
         // Populated by financialDataFetcher.enrichFilings - without it a filing
         // is a citable URL carrying no information
@@ -300,13 +479,95 @@ class IntelligenceService {
         source: 'SEC EDGAR',
         publishedAt: filing.date ? new Date(filing.date) : undefined,
         type: 'filing',
+        reason: 'filing',
       });
     });
+
+    // A transcript always has the speaker's name and title on record, which
+    // makes it the best source in the report for an attributable quote
+    (evidence.financial.transcripts || []).slice(0, MAX_TRANSCRIPT_SOURCES).forEach(transcript => {
+      add({
+        title: transcript.title,
+        description: transcript.description,
+        url: transcript.url,
+        source: transcript.source,
+        publishedAt: transcript.publishedAt,
+        type: 'transcript',
+        reason: 'transcript',
+      });
+    });
+
+    (evidence.patents || []).slice(0, MAX_PATENT_SOURCES).forEach(patent => {
+      const entry = add({
+        title: `Patent: ${patent.title}`,
+        description: `${patent.status === 'granted' ? 'Granted' : 'Filed'} to ${patent.applicant}` +
+          `${patent.patentNumber ? ` — ${patent.patentNumber}` : ''}`,
+        url: patent.url,
+        source: 'USPTO',
+        publishedAt: patent.grantedAt || patent.filedAt,
+        type: 'patent',
+        reason: 'patent',
+      });
+      if (entry) patent.citations = [entry.index];
+    });
+
+    (evidence.contractAwards || []).slice(0, MAX_CONTRACT_SOURCES).forEach(award => {
+      const entry = add({
+        title: `Federal award ${award.awardId || ''} — ${award.agency || ''}`.trim(),
+        description: award.description,
+        url: award.url,
+        source: 'USAspending.gov',
+        publishedAt: award.startedAt,
+        type: 'contract',
+        reason: 'contract',
+      });
+      if (entry) award.citations = [entry.index];
+    });
+
+    // The results block cites the filing it was read from
+    const resultsSource = sources.find(s => s.reason === 'earnings');
+    if (resultsSource && evidence.financial.latestResults) {
+      evidence.financial.latestResults.citations = [resultsSource.index];
+    }
 
     return sources;
   }
 
-  // Strip the citation payload before storing: keep only the fields the UI needs
+  /**
+   * How well sourced this report actually is.
+   *
+   * A report written on nine sources and a report written on forty look
+   * identical once they are formatted, which is precisely the problem: the thin
+   * one reads as confident as the thorough one. This puts the number on the
+   * face of the document.
+   */
+  buildCoverage(sources, stats = {}) {
+    // By publisher, not by URL host: a Google News link points at
+    // news.google.com, so counting hosts would report one domain for a report
+    // written from thirty different outlets.
+    const domains = new Set(
+      sources
+        .map(s => crawlService.publisherKey({ publisher: s.source, url: s.url }))
+        .filter(Boolean)
+    );
+
+    const thin = sources.length < THIN_COVERAGE_FLOOR;
+
+    return {
+      sourceCount: sources.length,
+      uniqueDomains: domains.size,
+      articlesFetched: stats.articlesFetched || 0,
+      duplicatesDropped: stats.duplicatesDropped || 0,
+      thin,
+      warning: thin
+        ? `Thin coverage — this report was written from ${sources.length} source${sources.length === 1 ? '' : 's'} ` +
+          `across ${domains.size} domain${domains.size === 1 ? '' : 's'}. ` +
+          'Treat the conclusions as provisional and verify before using them in a client conversation.'
+        : '',
+    };
+  }
+
+  // Strip the extraction payload before storing: keep only the fields the UI needs
   toStoredSources(sources) {
     return sources.map(s => ({
       index: s.index,
@@ -315,7 +576,14 @@ class IntelligenceService {
       source: s.source,
       publishedAt: s.publishedAt,
       type: s.type,
+      reason: s.reason,
+      originalPublisher: s.originalPublisher,
     }));
+  }
+
+  /** Drop the raw article each record was extracted from before it is stored. */
+  toStoredRecords(records = []) {
+    return records.map(({ _article, ...rest }) => rest);
   }
 
   // ---- main pipeline -----------------------------------------------------
@@ -336,7 +604,7 @@ class IntelligenceService {
       ...(seller.priorityTopics?.length || seller.standardTopics?.length ? [] : seller.capabilities || []),
     ].filter(Boolean);
 
-    onProgress('Gathering news, filings and hiring data', 10);
+    onProgress('Crawling news, filings, hiring and public records', 10);
     const evidence = await this.gather(company, keywords);
 
     onProgress('Scoring account fit', 25);
@@ -348,7 +616,14 @@ class IntelligenceService {
       crm,
     });
 
+    // Numbering the sources also writes the citation back onto every extracted
+    // record, so this has to happen before anything renders them
     const sources = this.buildSources(evidence, company);
+    const coverage = this.buildCoverage(sources, evidence.crawlStats);
+
+    if (coverage.thin) {
+      console.warn(`⚠️ Thin coverage for ${company.name}: ${coverage.sourceCount} sources`);
+    }
 
     const prospect = {
       name: company.name,
@@ -364,15 +639,21 @@ class IntelligenceService {
       },
     };
 
-    const context = aiEngine.buildContext({ seller, prospect, crm });
+    // The verified records are handed to every pass as established fact, so the
+    // model builds on them and never contradicts or re-derives them
+    const context = aiEngine.buildContext({ seller, prospect, crm, evidence });
 
     // The brief is generated first because the value section builds on it. The
-    // two research passes are independent, so they ride alongside it.
+    // other passes are independent, so they ride alongside it.
     onProgress('Analysing signals against your pitch', 40);
-    const [brief, research, strategy] = await Promise.all([
+    const [brief, research, strategy, whitespace] = await Promise.all([
       aiEngine.generateExecutiveBrief(context, sources),
       aiEngine.generateResearch(context, sources),
       aiEngine.generateStrategy(context, sources),
+      // Only worth a call when there is something to read direction from
+      (evidence.patents?.length || evidence.contractAwards?.length)
+        ? aiEngine.generateWhitespace(context, sources, evidence)
+        : Promise.resolve({}),
     ]);
 
     onProgress('Building the value story', 75);
@@ -386,14 +667,29 @@ class IntelligenceService {
     return {
       score: { ...score, summary: scoreSummary },
       sources: this.toStoredSources(sources),
+      coverage,
       evidence,
       prospect,
-      sections: this.assemble({ brief, research, strategy, value, evidence, sources }),
+
+      // What the renderers draw directly, with no model in the path
+      records: {
+        executiveMoves: this.toStoredRecords(evidence.executiveMoves),
+        strategicPrograms: this.toStoredRecords(evidence.strategicPrograms),
+        regulatoryActions: this.toStoredRecords(evidence.regulatoryActions),
+        patents: evidence.patents || [],
+        contractAwards: evidence.contractAwards || [],
+        hiring: evidence.hiring || undefined,
+        latestResults: evidence.financial.latestResults || undefined,
+      },
+
+      sections: this.assemble({
+        brief, research, strategy, value, whitespace, evidence, sources,
+      }),
     };
   }
 
-  // Normalise the four AI payloads into the Report document shape
-  assemble({ brief = {}, research = {}, strategy = {}, value = {}, evidence, sources }) {
+  // Normalise the AI payloads into the Report document shape
+  assemble({ brief = {}, research = {}, strategy = {}, value = {}, whitespace = {}, evidence, sources }) {
     const sourceByIndex = new Map(sources.map(s => [s.index, s]));
 
     // Prefer the model's curated headlines, but fall back to raw articles so the
@@ -427,13 +723,13 @@ class IntelligenceService {
     const fallbackNews = evidence.news.slice(0, 5).map((article, i) => ({
       title: article.title,
       summary: (article.description || '').replace(/<[^>]*>/g, '').slice(0, 240),
-      source: article.source?.name || 'News',
+      source: article.publisher || 'News',
       url: article.url,
       publishedAt: article.publishedAt ? new Date(article.publishedAt) : undefined,
       citations: [i + 1],
     }));
 
-    const executivePerspective = this.cleanQuotes(brief.executivePerspective);
+    const executivePerspective = this.cleanQuotes(brief.executivePerspective, sources);
 
     const valueProps = (Array.isArray(value.valuePropositions) ? value.valuePropositions : [])
       .map((p, i) => {
@@ -453,6 +749,8 @@ class IntelligenceService {
         keyInsights: this.toInsights(brief.keyInsights, 8),
         opportunities: this.toInsights(brief.opportunities, 6),
         challenges: this.toInsights(brief.challenges, 5),
+        // The verified moves are rendered above these from the records; what
+        // the model adds here is the reading of them, not the roster
         peopleUpdates: this.toInsights(brief.peopleUpdates, 4),
         talkingPoints: this.toTalkingPoints(brief.talkingPoints, 6),
         topNews: topNews.length ? topNews : fallbackNews,
@@ -497,8 +795,15 @@ class IntelligenceService {
         hypotheses: this.toInsights(value.hypotheses, 5),
         pointOfView: this.toInsights(value.pointOfView, 5),
       },
+
+      whitespace: {
+        insights: this.toInsights(whitespace.insights, 5),
+        capabilityGaps: this.toInsights(whitespace.capabilityGaps, 4),
+      },
     };
   }
 }
 
 module.exports = new IntelligenceService();
+module.exports.CITATION_REASONS = CITATION_REASONS;
+module.exports.THIN_COVERAGE_FLOOR = THIN_COVERAGE_FLOOR;

@@ -5,6 +5,7 @@ const reportGenerator = require('./reportGenerator');
 const aiEngine = require('./aiEngine');
 const crmService = require('./crm');
 const companyDataFetcher = require('./dataFetchers/companyDataFetcher');
+const accountTagging = require('./accountTagging');
 
 /**
  * Owns the "generate a report" use case so both the accounts route (auto-run on
@@ -72,6 +73,22 @@ class ReportService {
         url: `https://finance.yahoo.com/quote/${company.ticker}`,
       });
     }
+
+    // The pages somebody put on the account. Indeed and LinkedIn Jobs are here
+    // and nowhere else: neither publishes a free API and both forbid scraping,
+    // so the report links to them rather than pretending to have read them.
+    const pages = company.pages || {};
+    const extra = [
+      [pages.careersUrl, 'Careers'],
+      [pages.investorRelationsUrl, 'Investor relations'],
+      [pages.pressUrl, 'Newsroom'],
+      [pages.indeedUrl, 'Indeed'],
+      [pages.linkedInPeopleUrl, 'LinkedIn people'],
+    ];
+
+    extra.forEach(([url, label]) => {
+      if (url) links.push({ label, url });
+    });
 
     const profiles = company.profiles || {};
 
@@ -207,6 +224,18 @@ class ReportService {
       console.warn(`⚠️ Firmographics backfill skipped for ${company.name}: ${error.message}`);
     });
 
+    // Which vertical trade press, regulator feeds, patent and contract lookups
+    // run for this account. Accounts added before tagging existed have none, so
+    // they are derived here from whatever the firmographics backfill just
+    // resolved - a hand-set tag is never overwritten.
+    if (accountTagging.backfill(company)) {
+      await company.save().catch(() => {});
+      console.log(`   ↳ Tagged as ${company.tags.vertical || 'untagged'}` +
+        `${company.tags.regulated ? ', regulated' : ''}` +
+        `${company.tags.governmentFacing ? ', government-facing' : ''}` +
+        `${company.tags.rndHeavy ? ', R&D-heavy' : ''}`);
+    }
+
     // The tenant's own CRM, when one is connected. contextFor never throws: a
     // CRM outage degrades the report to public evidence instead of failing it.
     setProgress('Reading your CRM', 8);
@@ -229,6 +258,11 @@ class ReportService {
     report.executiveBrief = result.sections.executiveBrief;
     report.research = result.sections.research;
     report.value = result.sections.value;
+    report.whitespace = result.sections.whitespace;
+    // The verified records the renderers draw directly, with no model in the
+    // path between the primary source and the page
+    report.evidence = result.records;
+    report.coverage = result.coverage;
     report.sources = result.sources;
     // Which provider actually served this report - it may have failed over to
     // the fallback part-way through, and the report should say so.

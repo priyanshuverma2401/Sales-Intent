@@ -38,6 +38,14 @@ const signalSchema = new mongoose.Schema({
       'documents',
       'podcasts',
       'crm',
+      // A named company programme - growth plan, cost programme, restructuring.
+      // The strongest trigger there is: it carries the company's own name for
+      // the thing, a date and usually a target figure.
+      'program',
+      // Dated public record rather than press spin, so both land as high
+      // confidence the moment they are found.
+      'patent',
+      'contract',
     ],
     required: true,
   },

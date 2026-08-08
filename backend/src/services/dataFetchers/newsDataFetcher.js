@@ -1,6 +1,17 @@
 const axios = require('axios');
 const Parser = require('rss-parser');
 
+// SUPERSEDED by dataFetchers/crawlService, which every caller now uses.
+//
+// This ran one generic Google News query plus one per keyword, which is what
+// capped a report at about nine sources. The crawl that replaced it adds GDELT,
+// Bing, vertical trade press, regulator feeds and the company's own press and
+// blog feeds, and dedupes syndicated copies across all of them.
+//
+// Kept because the shape it returns is simple and self-contained, and because
+// deleting a fetcher is the kind of change that is easy to regret when an
+// upstream starts refusing traffic. Nothing imports it today.
+
 // Multiple news sources for redundancy
 const NEWS_SOURCES = {
   newsapi: {

@@ -8,13 +8,22 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings2,
   Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
-import { accountsAPI, apiError, companiesAPI, reportsAPI } from '../services/api';
+import {
+  AccountPages,
+  AccountTags,
+  accountsAPI,
+  apiError,
+  companiesAPI,
+  reportsAPI,
+} from '../services/api';
 import { useAuthStore, focusTopics } from '../store/authStore';
 import AddAccountModal from '../components/AddAccountModal';
+import AccountSettingsModal from '../components/AccountSettingsModal';
 import {
   Alert,
   Badge,
@@ -39,6 +48,10 @@ interface Account {
   employees?: number;
   signalCount: number;
   notes?: string;
+  // Crawl settings, editable via AccountSettingsModal. Shared across the
+  // workspace: they are facts about the prospect, not one seat's opinion.
+  pages?: AccountPages;
+  tags?: AccountTags;
   financials?: { marketCap?: number; peRatio?: number };
   stock?: { currentPrice?: number };
   latestReport?: {
@@ -74,6 +87,8 @@ export default function AccountsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  // The account whose crawl settings are being edited, or null when closed
+  const [settingsFor, setSettingsFor] = useState<Account | null>(null);
 
   const [query, setQuery] = useState('');
   const [total, setTotal] = useState(0);
@@ -402,6 +417,21 @@ export default function AccountsPage() {
                       Check for news
                     </Button>
 
+                    {/* The careers and IR URLs, and which narrow crawls run.
+                        Nothing else in the app can set these, and without a
+                        careers URL a Workday or iCIMS account produces no
+                        hiring numbers at all. */}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={Settings2}
+                      disabled={busy}
+                      onClick={() => setSettingsFor(account)}
+                      className="lg:w-full"
+                    >
+                      Settings
+                    </Button>
+
                     <Button
                       size="sm"
                       variant="danger"
@@ -424,6 +454,19 @@ export default function AccountsPage() {
           })}
         </div>
       )}
+
+      <AccountSettingsModal
+        open={Boolean(settingsFor)}
+        account={settingsFor}
+        onClose={() => setSettingsFor(null)}
+        onSaved={() => {
+          load(true);
+          setMessage({
+            tone: 'success',
+            text: `${settingsFor?.name} settings saved. They take effect on the next report or refresh.`,
+          });
+        }}
+      />
 
       <AddAccountModal
         open={modalOpen}

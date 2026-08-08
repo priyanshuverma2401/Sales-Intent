@@ -28,6 +28,35 @@ export interface Source {
   source?: string;
   publishedAt?: string;
   type?: string;
+  // Why this source is in the report, from a fixed vocabulary set server-side.
+  // Shown in the reference list and on hovering a citation chip.
+  reason?: string;
+  originalPublisher?: string;
+}
+
+// Kept in step with CITATION_REASONS in the backend's intelligenceService. A
+// reason the server sends that is missing here falls back to the raw value
+// rather than disappearing.
+export const CITATION_REASONS: Record<string, string> = {
+  financial: 'Financial snapshot',
+  earnings: 'Reported results',
+  filing: 'Regulatory filing',
+  transcript: 'Earnings call',
+  program: 'Strategic programme',
+  regulatory: 'Regulatory action',
+  people: 'Leadership change',
+  hiring: 'Hiring activity',
+  job: 'Open role',
+  patent: 'Patent record',
+  contract: 'Federal contract',
+  partnership: 'Partnership / deal',
+  restructuring: 'Restructuring',
+  news: 'News coverage',
+};
+
+export function reasonLabel(source?: Source) {
+  if (!source?.reason) return source?.type || '';
+  return CITATION_REASONS[source.reason] || source.reason;
 }
 
 export const MARKER_COLORS = {
@@ -58,6 +87,11 @@ export function Citations({
       {citations.map((n) => {
         const source = byIndex.get(n);
         const label = `[${n}]`;
+        // The reason rides on the tooltip rather than beside the chip: inline
+        // it would double the length of every claim for a reader who mostly
+        // wants to know a claim is sourced at all.
+        const reason = reasonLabel(source);
+        const hint = [source?.title, reason].filter(Boolean).join(' — ');
 
         // A citation with a resolvable URL opens the source; otherwise it still
         // points at the numbered entry in the Sources section.
@@ -67,7 +101,7 @@ export function Citations({
             href={source.url}
             target="_blank"
             rel="noopener noreferrer"
-            title={source.title}
+            title={hint}
             className="rounded bg-brand-50 px-1 text-[10px] font-bold text-brand-600 ring-1 ring-inset ring-brand-200 transition hover:bg-brand-100"
           >
             {label}
@@ -271,6 +305,370 @@ export function QuoteCard({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Verified record blocks
+//
+// Every line these render came out of a filing, a job board, a public register
+// or a dated article, extracted server-side in code. None of it passed through
+// the model, which is why these lines can carry a name and a figure.
+//
+// Each block renders null when it holds nothing. An absent block is the honest
+// answer - the alternative is five "none found" rows on most reports.
+// ---------------------------------------------------------------------------
+
+const monthYear = (value?: string | Date) =>
+  value
+    ? new Date(value).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : '';
+
+const money = (value?: number) => {
+  if (!Number.isFinite(Number(value))) return '';
+  const n = Number(value);
+  if (Math.abs(n) >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  return `$${n.toLocaleString()}`;
+};
+
+const TONE_BAR: Record<MarkerTone, string> = {
+  brand: 'border-brand-500',
+  amber: 'border-amber-500',
+  green: 'border-emerald-500',
+  red: 'border-red-500',
+  purple: 'border-violet-500',
+  teal: 'border-cyan-600',
+  slate: 'border-slate-400',
+};
+
+const TONE_TEXT: Record<MarkerTone, string> = {
+  brand: 'text-brand-700',
+  amber: 'text-amber-700',
+  green: 'text-emerald-700',
+  red: 'text-red-700',
+  purple: 'text-violet-700',
+  teal: 'text-cyan-700',
+  slate: 'text-ink-muted',
+};
+
+/** A labelled run of verified records, set off from the written insights. */
+export function RecordBlock({
+  label,
+  tone = 'brand',
+  children,
+}: {
+  label: string;
+  tone?: MarkerTone;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cx('mb-4 border-l-2 pl-3.5 print-block', TONE_BAR[tone])}>
+      <h4
+        className={cx(
+          'mb-2 text-2xs font-bold uppercase tracking-[0.12em]',
+          TONE_TEXT[tone]
+        )}
+      >
+        {label}
+      </h4>
+      <div className="space-y-2.5">{children}</div>
+    </div>
+  );
+}
+
+/** One record: a bold lead, a muted detail line, citations on the end. */
+export function RecordLine({
+  lead,
+  detail,
+  url,
+  citations,
+  sources,
+}: {
+  lead: string;
+  detail?: string;
+  url?: string;
+  citations?: number[];
+  sources: Source[];
+}) {
+  if (!lead) return null;
+
+  return (
+    <div className="print-block">
+      <p className="text-[14px] font-semibold leading-snug text-ink">
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-brand-700 hover:underline"
+          >
+            {lead}
+          </a>
+        ) : (
+          lead
+        )}
+      </p>
+      {detail && (
+        <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-soft">
+          {detail}
+          <Citations citations={citations} sources={sources} />
+        </p>
+      )}
+      {!detail && <Citations citations={citations} sources={sources} />}
+    </div>
+  );
+}
+
+/**
+ * Said on the face of the report rather than left for the reader to infer.
+ *
+ * A report written on nine sources and one written on forty format identically,
+ * and the thin one reads exactly as confident as the thorough one.
+ */
+export function CoverageWarning({ coverage }: { coverage?: any }) {
+  if (!coverage?.thin || !coverage.warning) return null;
+
+  return (
+    <div className="print-block rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+      <p className="text-[13px] font-semibold text-amber-900">Thin coverage</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-amber-800">{coverage.warning}</p>
+    </div>
+  );
+}
+
+export function ProgramBlock({ programs, sources }: { programs?: any[]; sources: Source[] }) {
+  const list = (programs || []).filter((p) => p?.name);
+  if (!list.length) return null;
+
+  return (
+    <RecordBlock label="Named programmes" tone="purple">
+      {list.slice(0, 4).map((program, i) => (
+        <RecordLine
+          key={i}
+          lead={[program.name, program.headlineNumber].filter(Boolean).join(' — ')}
+          detail={[
+            program.announcedAt ? `Announced ${monthYear(program.announcedAt)}` : null,
+            program.summary,
+          ]
+            .filter(Boolean)
+            .join('. ')}
+          url={program.url}
+          citations={program.citations}
+          sources={sources}
+        />
+      ))}
+    </RecordBlock>
+  );
+}
+
+const REGULATORY_LABELS: Record<string, string> = {
+  fine: 'Fine',
+  enforcement: 'Enforcement action',
+  licence: 'Licence action',
+  'stress-test': 'Capital / stress-test requirement',
+  deadline: 'Compliance deadline',
+  advisory: 'Advisory',
+};
+
+export function RegulatoryBlock({ actions, sources }: { actions?: any[]; sources: Source[] }) {
+  const list = (actions || []).filter((a) => a?.regulator);
+  if (!list.length) return null;
+
+  return (
+    <RecordBlock label="Regulatory triggers" tone="red">
+      {list.slice(0, 4).map((action, i) => (
+        <RecordLine
+          key={i}
+          lead={[
+            `${action.regulator} — ${REGULATORY_LABELS[action.actionType] || action.actionType}`,
+            action.amount,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          detail={[monthYear(action.announcedAt), action.detail].filter(Boolean).join(' · ')}
+          url={action.url}
+          citations={action.citations}
+          sources={sources}
+        />
+      ))}
+    </RecordBlock>
+  );
+}
+
+export function ResultsBlock({ results, sources }: { results?: any; sources: Source[] }) {
+  if (!results) return null;
+
+  const parts = [
+    results.revenue ? `${money(results.revenue)} revenue` : null,
+    results.profit ? `${money(results.profit)} profit` : null,
+    Number.isFinite(results.eps) ? `EPS ${Number(results.eps).toFixed(2)}` : null,
+    results.buybackAmount ? `${money(results.buybackAmount)} buybacks` : results.buyback || null,
+    Number.isFinite(results.dividendPerShare)
+      ? `dividend ${Number(results.dividendPerShare).toFixed(2)}/share`
+      : null,
+  ].filter(Boolean);
+
+  if (!parts.length) return null;
+
+  return (
+    <RecordBlock label="Latest results" tone="teal">
+      <RecordLine
+        lead={`${results.period || 'Latest period'}: ${parts.join(', ')}`}
+        detail={[
+          results.lastEarningsAt
+            ? `Reported ${new Date(results.lastEarningsAt).toLocaleDateString()}`
+            : null,
+          results.source,
+        ]
+          .filter(Boolean)
+          .join('  ·  ')}
+        url={results.url}
+        citations={results.citations}
+        sources={sources}
+      />
+    </RecordBlock>
+  );
+}
+
+export function HiringBlock({ hiring, sources }: { hiring?: any; sources: Source[] }) {
+  if (!hiring?.summary) return null;
+
+  return (
+    <RecordBlock label="Hiring signal" tone="green">
+      <RecordLine
+        lead={hiring.summary}
+        detail={[
+          (hiring.byFunction || [])
+            .slice(0, 4)
+            .map((f: any) => `${f.name} ${f.count}`)
+            .join('  ·  '),
+          hiring.source,
+        ]
+          .filter(Boolean)
+          .join('  —  ')}
+        citations={hiring.citations}
+        sources={sources}
+      />
+    </RecordBlock>
+  );
+}
+
+/**
+ * Executive moves, newest first.
+ *
+ * The one block that speaks when it is empty. "No specific executives
+ * mentioned" reads as a broken product; this states the window that was
+ * searched and stops there.
+ */
+export function PeopleBlock({ moves, sources }: { moves?: any[]; sources: Source[] }) {
+  const list = (moves || []).filter((m) => m?.person);
+
+  if (!list.length) {
+    return (
+      <p className="text-[13.5px] leading-relaxed text-ink-soft">
+        No verified executive moves in the last 90 days.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {list.slice(0, 6).map((move, i) => {
+        const context = [
+          monthYear(move.announcedAt),
+          move.counterparty
+            ? move.movement === 'left'
+              ? `now at ${move.counterparty}`
+              : `ex-${move.counterparty}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        const head =
+          move.movement === 'left'
+            ? `${move.person} — stepped down${move.role ? ` as ${move.role}` : ''}`
+            : `${move.person} — ${move.movement === 'promoted' ? 'promoted to ' : ''}${move.role}`;
+
+        return (
+          <RecordLine
+            key={i}
+            lead={context ? `${head} (${context})` : head}
+            detail={move.source}
+            url={move.url}
+            citations={move.citations}
+            sources={sources}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+export function ContractBlock({
+  awards,
+  sources,
+  compact = false,
+}: {
+  awards?: any[];
+  sources: Source[];
+  compact?: boolean;
+}) {
+  const list = (awards || []).filter((a) => a?.agency || a?.awardId);
+  if (!list.length) return null;
+
+  return (
+    <RecordBlock label="Federal contract awards" tone="brand">
+      {list.slice(0, compact ? 2 : 6).map((award, i) => (
+        <RecordLine
+          key={i}
+          lead={[money(award.amount) || 'Undisclosed', award.agency].filter(Boolean).join(' — ') +
+            (award.startedAt ? ` (${monthYear(award.startedAt)})` : '')}
+          detail={
+            compact
+              ? award.awardId
+                ? `Award ${award.awardId}`
+                : undefined
+              : [award.awardId ? `Award ${award.awardId}` : null, award.description]
+                  .filter(Boolean)
+                  .join(' — ')
+          }
+          url={award.url}
+          citations={award.citations}
+          sources={sources}
+        />
+      ))}
+    </RecordBlock>
+  );
+}
+
+export function PatentBlock({ patents, sources }: { patents?: any[]; sources: Source[] }) {
+  const list = (patents || []).filter((p) => p?.title);
+  if (!list.length) return null;
+
+  return (
+    <RecordBlock label="Patent activity" tone="teal">
+      {list.slice(0, 6).map((patent, i) => (
+        <RecordLine
+          key={i}
+          lead={patent.title}
+          detail={[
+            `${patent.status === 'granted' ? 'Granted' : 'Filed'} ${monthYear(
+              patent.grantedAt || patent.filedAt
+            )}`.trim(),
+            patent.patentNumber,
+            patent.applicant,
+          ]
+            .filter(Boolean)
+            .join('  ·  ')}
+          url={patent.url}
+          citations={patent.citations}
+          sources={sources}
+        />
+      ))}
+    </RecordBlock>
+  );
+}
+
 export function NewsList({ items, sources }: { items?: any[]; sources: Source[] }) {
   if (!items?.length) {
     return (
@@ -354,7 +752,8 @@ export function SourcesList({ sources }: { sources: Source[] }) {
               {[
                 source.source,
                 source.publishedAt ? new Date(source.publishedAt).toLocaleDateString() : null,
-                source.type,
+                reasonLabel(source),
+                source.originalPublisher ? `originally ${source.originalPublisher}` : null,
               ]
                 .filter(Boolean)
                 .join('  ·  ')}

@@ -2,6 +2,14 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
+// The record formatters live with the extractors that produce them, so the PDF
+// and the web report cannot drift into printing the same record two ways
+const executiveMoves = require('./extractors/executiveMoves');
+const contractFetcher = require('./dataFetchers/contractFetcher');
+const patentFetcher = require('./dataFetchers/patentFetcher');
+const { ACTION_LABELS: REGULATORY_LABELS } = require('./extractors/regulatoryActions');
+const { CITATION_REASONS } = require('./intelligenceService');
+
 // ---------------------------------------------------------------------------
 // Design tokens.
 //
@@ -733,6 +741,14 @@ class ReportGenerator {
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
+  // "May 2026" - how every extracted record states when it happened
+  monthYear(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+
   // A report can be regenerated more than once in a day, so "last refreshed"
   // only means something with the time on it
   moment(value) {
@@ -985,8 +1001,25 @@ class ReportGenerator {
 
   executiveBriefPages(doc, ctx, report) {
     const brief = report.executiveBrief || {};
+    const evidence = report.evidence || {};
+
+    // Coverage first, before anything it qualifies. A reader who has already
+    // absorbed six insights before being told the report was written on nine
+    // sources has been misled by the ordering alone.
+    this.coverageWarning(doc, ctx, report.coverage);
 
     this.h1(doc, ctx, 'Key Insights', { follows: this.listOpener(doc, brief.keyInsights) });
+
+    // Pinned above the written insights: the verified records, in trigger
+    // order. Programmes and regulatory actions share the top tier - both are
+    // dated commitments the account has made, and both are things a rep can
+    // open a call with. The model's insights follow underneath.
+    this.programBlock(doc, ctx, evidence.strategicPrograms);
+    this.regulatoryBlock(doc, ctx, evidence.regulatoryActions);
+    this.contractBlock(doc, ctx, evidence.contractAwards, { compact: true });
+    this.resultsBlock(doc, ctx, evidence.latestResults);
+    this.hiringBlock(doc, ctx, evidence.hiring);
+
     this.bulletList(doc, ctx, brief.keyInsights, { icon: 'bulb', color: C.amber });
 
     this.h1(doc, ctx, 'Opportunities', { follows: this.listOpener(doc, brief.opportunities) });
@@ -995,8 +1028,16 @@ class ReportGenerator {
     this.h1(doc, ctx, 'Challenges', { follows: this.listOpener(doc, brief.challenges) });
     this.bulletList(doc, ctx, brief.challenges, { icon: 'case', color: C.red });
 
-    this.h1(doc, ctx, 'People Updates', { follows: this.listOpener(doc, brief.peopleUpdates) });
-    this.bulletList(doc, ctx, brief.peopleUpdates, { icon: 'person', color: C.blue });
+    // Verified moves first, newest first, then what the model reads into them.
+    // A section that carries both never says "no specific executives
+    // mentioned" - either it lists the people or it says plainly there were none.
+    this.h1(doc, ctx, 'People Updates', {
+      follows: this.listOpener(doc, brief.peopleUpdates),
+    });
+    this.peopleBlock(doc, ctx, evidence.executiveMoves);
+    if (brief.peopleUpdates?.length) {
+      this.bulletList(doc, ctx, brief.peopleUpdates, { icon: 'person', color: C.blue });
+    }
 
     const news = (brief.topNews || []).filter(n => n?.title);
     this.h1(doc, ctx, 'Top News', { follows: this.newsItemHeight(doc, news[0]) });
@@ -1014,6 +1055,260 @@ class ReportGenerator {
       });
       brief.executivePerspective.forEach(q => this.quoteCard(doc, ctx, q));
     }
+  }
+
+  // =========================================================================
+  // Verified record blocks
+  //
+  // Everything drawn here came out of a filing, a job board, a public register
+  // or a dated article, and was extracted in code. None of it passed through
+  // the model, which is why these lines can carry a figure and a name.
+  //
+  // Each block renders nothing at all when it holds no records. An absent block
+  // is the honest answer; a block saying "none found" on every account would be
+  // five lines of nothing on most reports.
+  // =========================================================================
+
+  /**
+   * One record: a bold lead line, a muted detail line under it, citations on
+   * the end. The pair never splits across a page.
+   */
+  recordLine(doc, ctx, { icon, color, lead, detail, citations = [], link }) {
+    if (!lead) return;
+
+    const indent = 26;
+    const leadOptions = { font: F.bold, size: 9.6, color: C.ink, indent, lineGap: 2, link };
+    const detailOptions = {
+      size: 8.8, color: C.body, indent, lineGap: 2.4,
+      citations: Array.isArray(citations) ? citations.slice(0, 3) : [],
+    };
+
+    this.fitBlock(doc, ctx,
+      this.flowHeight(doc, lead, leadOptions)
+      + (detail ? 3 + this.flowHeight(doc, detail, detailOptions) : 0));
+
+    this.drawIcon(doc, icon, MARGIN + 1, doc.y + 0.5, 10.5, color);
+    this.writeText(doc, lead, leadOptions);
+
+    if (detail) {
+      this.space(doc, 3);
+      this.writeText(doc, detail, detailOptions);
+    }
+
+    this.space(doc, 9);
+  }
+
+  /** A small label above a run of records, so the block reads as one thing. */
+  blockLabel(doc, ctx, text, color = C.blue) {
+    this.ensure(doc, ctx, 22);
+    doc.font(F.bold).fontSize(7.4).fillColor(color)
+      .text(text.toUpperCase(), MARGIN, doc.y, {
+        width: CONTENT_WIDTH,
+        characterSpacing: 0.9,
+      });
+    this.space(doc, 5);
+  }
+
+  /**
+   * Said on the face of the report rather than left for the reader to work out.
+   *
+   * A report written on nine sources and one written on forty format
+   * identically, and the thin one reads exactly as confident as the thorough
+   * one. This is the only thing that separates them.
+   */
+  coverageWarning(doc, ctx, coverage) {
+    if (!coverage?.thin || !coverage.warning) return;
+
+    const padding = 12;
+    const inner = CONTENT_WIDTH - padding * 2;
+
+    doc.font(F.regular).fontSize(8.8);
+    const height = doc.heightOfString(coverage.warning, { width: inner - 16, lineGap: 2.4 })
+      + padding * 2;
+
+    this.fitBlock(doc, ctx, height);
+
+    const top = doc.y;
+    doc.save();
+    doc.roundedRect(MARGIN, top, CONTENT_WIDTH, height, 6).fill('#fdf6e7');
+    doc.restore();
+
+    this.drawIcon(doc, 'question', MARGIN + padding, top + padding - 1, 11, C.amber);
+    doc.font(F.regular).fontSize(8.8).fillColor(C.ink)
+      .text(coverage.warning, MARGIN + padding + 16, top + padding, { width: inner - 16, lineGap: 2.4 });
+
+    doc.y = top + height;
+    this.space(doc, 14);
+  }
+
+  /** Named programmes - the strongest trigger, so it sits above everything. */
+  programBlock(doc, ctx, programs = []) {
+    const list = (programs || []).filter(p => p?.name);
+    if (!list.length) return;
+
+    this.blockLabel(doc, ctx, 'Named programmes', C.purple);
+
+    list.slice(0, 4).forEach(program => {
+      const when = this.monthYear(program.announcedAt);
+      this.recordLine(doc, ctx, {
+        icon: 'target',
+        color: C.purple,
+        lead: [program.name, program.headlineNumber].filter(Boolean).join(' — '),
+        detail: [when ? `Announced ${when}` : null, program.summary].filter(Boolean).join('. '),
+        citations: program.citations,
+        link: program.url,
+      });
+    });
+  }
+
+  /** Regulatory action: same tier as a programme, because the deadline is real. */
+  regulatoryBlock(doc, ctx, actions = []) {
+    const list = (actions || []).filter(a => a?.regulator);
+    if (!list.length) return;
+
+    this.blockLabel(doc, ctx, 'Regulatory triggers', C.red);
+
+    list.slice(0, 4).forEach(action => {
+      const when = this.monthYear(action.announcedAt);
+      const label = REGULATORY_LABELS[action.actionType] || action.actionType;
+
+      this.recordLine(doc, ctx, {
+        icon: 'case',
+        color: C.red,
+        lead: [`${action.regulator} — ${label}`, action.amount].filter(Boolean).join(' · '),
+        detail: [when, action.detail].filter(Boolean).join(' · '),
+        citations: action.citations,
+        link: action.url,
+      });
+    });
+  }
+
+  /** Filed results. Every figure came off a filing; absent ones stay absent. */
+  resultsBlock(doc, ctx, results) {
+    if (!results) return;
+
+    const parts = [
+      results.revenue ? `${this.money(results.revenue, results.currency)} revenue` : null,
+      results.profit ? `${this.money(results.profit, results.currency)} profit` : null,
+      Number.isFinite(results.eps) ? `EPS ${Number(results.eps).toFixed(2)}` : null,
+      results.buybackAmount
+        ? `${this.money(results.buybackAmount, results.currency)} buybacks`
+        : (results.buyback || null),
+      Number.isFinite(results.dividendPerShare)
+        ? `dividend ${Number(results.dividendPerShare).toFixed(2)}/share`
+        : null,
+    ].filter(Boolean);
+
+    if (!parts.length) return;
+
+    this.blockLabel(doc, ctx, 'Latest results', C.teal);
+
+    const reported = results.lastEarningsAt
+      ? `Reported ${this.day(results.lastEarningsAt)}`
+      : (results.periodEndedAt ? `Period ended ${this.day(results.periodEndedAt)}` : null);
+
+    this.recordLine(doc, ctx, {
+      icon: 'chart',
+      color: C.teal,
+      lead: `${results.period || 'Latest period'}: ${parts.join(', ')}`,
+      detail: [reported, results.source].filter(Boolean).join('  ·  '),
+      citations: results.citations,
+      link: results.url,
+    });
+  }
+
+  /** The counted hiring line. Nothing counted, nothing shown. */
+  hiringBlock(doc, ctx, hiring) {
+    if (!hiring?.summary) return;
+
+    this.blockLabel(doc, ctx, 'Hiring signal', C.green);
+
+    const breakdown = (hiring.byFunction || [])
+      .slice(0, 4)
+      .map(f => `${f.name} ${f.count}`)
+      .join('  ·  ');
+
+    this.recordLine(doc, ctx, {
+      icon: 'person',
+      color: C.green,
+      lead: hiring.summary,
+      detail: [breakdown, hiring.source].filter(Boolean).join('  —  '),
+      citations: hiring.citations,
+    });
+  }
+
+  /**
+   * Executive moves, newest first.
+   *
+   * The one block that speaks when it is empty. "No specific executives
+   * mentioned" reads as a broken product; the replacement states the window
+   * that was searched and leaves it there.
+   */
+  peopleBlock(doc, ctx, moves = []) {
+    const list = (moves || []).filter(m => m?.person);
+
+    if (!list.length) {
+      this.ensure(doc, ctx, 22);
+      this.writeText(doc, 'No verified executive moves in the last 90 days.', {
+        size: 9.2,
+        color: C.body,
+        indent: 26,
+      });
+      this.space(doc, 11);
+      return;
+    }
+
+    list.slice(0, 6).forEach(move => {
+      this.recordLine(doc, ctx, {
+        icon: 'person',
+        color: C.blue,
+        lead: executiveMoves.format(move),
+        detail: move.source || '',
+        citations: move.citations,
+        link: move.url,
+      });
+    });
+  }
+
+  /** Federal awards. `compact` is the Key Insights form; full is Whitespace. */
+  contractBlock(doc, ctx, awards = [], { compact = false } = {}) {
+    const list = (awards || []).filter(a => a?.agency || a?.awardId);
+    if (!list.length) return;
+
+    this.blockLabel(doc, ctx, 'Federal contract awards', C.brand);
+
+    list.slice(0, compact ? 2 : 6).forEach(award => {
+      this.recordLine(doc, ctx, {
+        icon: 'building',
+        color: C.brand,
+        lead: contractFetcher.format(award),
+        detail: compact
+          ? (award.awardId ? `Award ${award.awardId}` : '')
+          : [award.awardId ? `Award ${award.awardId}` : null, award.description]
+              .filter(Boolean).join(' — '),
+        citations: award.citations,
+        link: award.url,
+      });
+    });
+  }
+
+  /** Patent filings and grants - direction, not a trigger. */
+  patentBlock(doc, ctx, patents = []) {
+    const list = (patents || []).filter(p => p?.title);
+    if (!list.length) return;
+
+    this.blockLabel(doc, ctx, 'Patent activity', C.teal);
+
+    list.slice(0, 6).forEach(patent => {
+      this.recordLine(doc, ctx, {
+        icon: 'bulb',
+        color: C.teal,
+        lead: patent.title,
+        detail: [patentFetcher.format(patent), patent.applicant].filter(Boolean).join('  ·  '),
+        citations: patent.citations,
+        link: patent.url,
+      });
+    });
   }
 
   newsParts(item) {
@@ -1105,8 +1400,12 @@ class ReportGenerator {
     const inner = CONTENT_WIDTH - padding * 2 - 6;
     const body = `"${String(quote.quote).trim()}"`;
     const attributionParts = [quote.person, quote.title].filter(Boolean).join(', ');
-    const source = quote.source ? ` at ${quote.source}` : '';
-    const attribution = attributionParts ? `– ${attributionParts}${source}` : '';
+    // Where and when, both off the cited source rather than the model - a quote
+    // with no date cannot be checked, which is why one is required upstream
+    const context = [quote.source, this.day(quote.publishedAt)].filter(Boolean).join(', ');
+    const attribution = attributionParts
+      ? `– ${attributionParts}${context ? ` — ${context}` : ''}`
+      : '';
     const citations = Array.isArray(quote.citations) ? quote.citations : [];
 
     const height = this.quoteCardHeight(doc, quote);
@@ -1273,6 +1572,63 @@ class ReportGenerator {
       ['Opportunities', r.swot?.opportunities, C.blue],
       ['Threats', r.swot?.threats, C.amber],
     ]);
+
+    this.whitespacePages(doc, ctx, report);
+  }
+
+  /**
+   * Whitespace Identification.
+   *
+   * Patents and federal awards are dated public record, filed months before the
+   * programme they belong to is announced. That makes them the wrong thing to
+   * open a call with and the right thing to shape a roadmap around - so they
+   * sit in Research rather than among the triggers in Key Insights, and the
+   * narrative is written about direction rather than about timing.
+   *
+   * The section itself always renders; the patent and contract blocks inside it
+   * appear only when there is something in them.
+   */
+  whitespacePages(doc, ctx, report) {
+    const whitespace = report.whitespace || {};
+    const evidence = report.evidence || {};
+
+    const patents = (evidence.patents || []).filter(p => p?.title);
+    const awards = (evidence.contractAwards || []).filter(a => a?.agency || a?.awardId);
+    const insights = (whitespace.insights || []).filter(Boolean);
+    const gaps = (whitespace.capabilityGaps || []).filter(Boolean);
+
+    this.h1(doc, ctx, 'Whitespace Identification', {
+      icon: 'eye',
+      follows: patents.length || awards.length ? 40 : this.listOpener(doc, insights),
+    });
+
+    this.paragraph(doc, ctx,
+      'R&D and public-sector activity on the public record — patent filings and federal contract awards. ' +
+      'These run ahead of anything the company has announced, so they read as direction rather than as a trigger.',
+      { size: 9, color: C.muted });
+
+    this.patentBlock(doc, ctx, patents);
+    this.contractBlock(doc, ctx, awards);
+
+    if (insights.length) {
+      this.h3(doc, ctx, 'What this points to', { follows: this.listOpener(doc, insights) });
+      this.bulletList(doc, ctx, insights, { icon: 'dot', color: C.teal });
+    }
+
+    if (gaps.length) {
+      this.h3(doc, ctx, 'Capability gaps it opens', { follows: this.listOpener(doc, gaps) });
+      this.bulletList(doc, ctx, gaps, { icon: 'dot', color: C.green });
+    }
+
+    // Nothing found anywhere: say what was searched rather than leaving a
+    // heading with a blank page under it
+    if (!patents.length && !awards.length && !insights.length && !gaps.length) {
+      this.writeText(doc,
+        'No patent filings or US federal contract awards are on record for this account. ' +
+        'Patent and contract crawls run only for accounts tagged as R&D-heavy or government-facing.',
+        { font: F.italic, size: 9, color: C.muted, indent: 26 });
+      this.space(doc, 11);
+    }
   }
 
   // A section of labelled subsections; the title keeps the first claim with it
@@ -1391,7 +1747,11 @@ class ReportGenerator {
       const meta = [
         source.source,
         source.publishedAt ? this.formatDate(source.publishedAt) : null,
-        source.type,
+        // Why this source is here, not just what kind of thing it is. A reader
+        // scanning the list can tell a filed result from a press mention
+        // without opening either.
+        CITATION_REASONS[source.reason] || source.type,
+        source.originalPublisher ? `originally ${source.originalPublisher}` : null,
       ].filter(Boolean).join('  ·  ');
 
       const titleOptions = {

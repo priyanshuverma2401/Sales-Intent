@@ -30,6 +30,56 @@ const companySchema = new mongoose.Schema({
   // different one.
   wikidataId: String,
 
+  // --- First-party pages we read directly -----------------------------------
+  //
+  // These are facts about the prospect, not one tenant's opinion of it, so they
+  // live on the shared company record: whoever fills one in has done the work
+  // for every tenant watching the same account.
+  //
+  // Each is optional. A missing URL means that source contributes nothing - it
+  // is never guessed at, because a wrong careers URL yields another company's
+  // headcount and a wrong IR URL yields another company's results.
+  //
+  // Named `pages` rather than `sources` to keep it distinct from Report.sources,
+  // which is the numbered citation list a finished report is written against.
+  pages: {
+    // ATS board or careers page. Workday and iCIMS cannot be reached without
+    // the tenant slug this URL carries, so for those two it is the only way in.
+    careersUrl: String,
+    // Investor relations, for companies Finnhub does not cover well
+    investorRelationsUrl: String,
+    // Press / newsroom - where senior hires are usually announced first
+    pressUrl: String,
+    // Discovered from the homepage's <link rel="alternate">, or set by hand
+    blogRssUrl: String,
+    // Held for the reference list only. Never fetched: both are ToS-sensitive
+    // and neither publishes a free API.
+    linkedInPeopleUrl: String,
+    indeedUrl: String,
+  },
+
+  // --- Crawl targeting ------------------------------------------------------
+  //
+  // Which of the vertical trade-press, regulator, patent and contract crawls
+  // run for this account. Derived from `industry` when the account is added and
+  // editable afterwards - see services/accountTagging.js.
+  //
+  // Untagged accounts still get the always-on cross-industry crawl; these only
+  // ever add sources, never remove them.
+  tags: {
+    // travel | shipping | healthcare | insurance | bfsi | itbpm | utilities | null
+    vertical: String,
+    // Regulated industries: compliance deadlines create budget with a date on it
+    regulated: { type: Boolean, default: false },
+    // Public-sector exposure, gating the USAspending crawl
+    governmentFacing: { type: Boolean, default: false },
+    // R&D/IP-heavy, gating the USPTO crawl
+    rndHeavy: { type: Boolean, default: false },
+    // False once a human has edited them, so a later backfill cannot overwrite
+    // a correction with another guess
+    autoTagged: { type: Boolean, default: true },
+  },
+
   // Financial Data
   financials: {
     marketCap: Number,
