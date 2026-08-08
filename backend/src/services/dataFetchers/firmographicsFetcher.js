@@ -36,6 +36,9 @@ const P = {
   exchange: 'P414',
   pointInTime: 'P585',
   endTime: 'P582',
+  linkedin: 'P4264',        // LinkedIn company or organisation page id
+  crunchbase: 'P8931',      // Crunchbase organisation id
+  crunchbaseLegacy: 'P2088', // the id these were stored under before P8931
 };
 
 // Wikidata states amounts in a currency item, not an ISO code. Only the ones a
@@ -68,11 +71,15 @@ class FirmographicsFetcher {
   // ---- low-level Wikidata access -----------------------------------------
 
   /**
-   * One call against the API, retried once if the anonymous quota is hit.
-   * A report needs three of these back to back and Wikidata throttles bursts,
-   * so a single 429 should not cost the whole lookup.
+   * One call against the API, retried when the anonymous quota is hit.
+   *
+   * A report needs three of these back to back, the account search box fires
+   * two per query, and Wikidata throttles bursts - so a 429 must not cost the
+   * whole lookup. It is the one failure worth waiting on: a throttled search
+   * comes back with nothing filtered, which is how a person and a prize end up
+   * offered as accounts.
    */
-  async request(params, timeout = 10000) {
+  async request(params, timeout = 10000, retries = 2) {
     for (let attempt = 0; ; attempt++) {
       try {
         const { data } = await axios.get(WIKIDATA_API, {
@@ -82,24 +89,48 @@ class FirmographicsFetcher {
         });
         return data;
       } catch (error) {
-        if (attempt >= 1 || error.response?.status !== 429) throw error;
-        const wait = Number(error.response.headers?.['retry-after']) * 1000 || 1200;
-        await new Promise(resolve => setTimeout(resolve, Math.min(wait, 5000)));
+        const status = error.response?.status;
+        const retryable = status === 429 || (status >= 500 && status < 600);
+        if (attempt >= retries || !retryable) throw error;
+
+        const stated = Number(error.response?.headers?.['retry-after']) * 1000;
+        const wait = stated || 700 * 2 ** attempt;
+        await new Promise(resolve => setTimeout(resolve, Math.min(wait, 4000)));
       }
     }
   }
 
   async search(name) {
+    return (await this.suggest(name, 5)).map(hit => hit.id);
+  }
+
+  /**
+   * Name search against Wikidata's labels and aliases, hits kept whole.
+   *
+   * This is the search that knows "Zoho" is Zoho Corporation and that "MSFT" is
+   * Microsoft, which a full-text article search does not - it ranks by how much
+   * an article talks about the term, so the company itself often loses to a page
+   * about its founder or one of its products.
+   */
+  async suggest(name, limit = 10) {
     const data = await this.request({
       action: 'wbsearchentities',
       search: name,
       language: 'en',
       uselang: 'en',
       type: 'item',
-      limit: 5,
+      limit,
     }, 8000);
 
-    return (data.search || []).map(hit => hit.id).filter(Boolean);
+    return (data.search || [])
+      .filter(hit => hit.id)
+      .map(hit => ({
+        id: hit.id,
+        // The alias that matched is what the person typed; the label is the
+        // company's registered name and is the better thing to show
+        label: hit.label || hit.match?.text || hit.id,
+        description: hit.description,
+      }));
   }
 
   async entities(ids, props) {
@@ -186,6 +217,37 @@ class FirmographicsFetcher {
   }
 
   /**
+   * The company's own pages on LinkedIn and Crunchbase.
+   *
+   * Both sites are reachable only by their own identifier - there is no URL that
+   * turns a company name into its page. Guessing a slug from the name lands on a
+   * 404 as often as not ("HDFC Bank" is /company/hdfc-bank, "State Bank of
+   * India" is /company/state-bank-of-india, "3M" is /company/3m), so the id is
+   * taken from Wikidata or the link is simply not offered.
+   */
+  profileUrls(claims = {}) {
+    const id = property => {
+      const value = this.best(claims[property])?.mainsnak?.datavalue?.value;
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    };
+
+    const linkedin = id(P.linkedin);
+    const crunchbase = id(P.crunchbase) || id(P.crunchbaseLegacy);
+
+    return {
+      // Most ids are the bare slug under /company/, but universities and
+      // showcase pages state their own segment ("school/iit-madras"), so an id
+      // that already names one is used as written
+      linkedin: linkedin
+        ? `https://www.linkedin.com/${linkedin.includes('/') ? linkedin : `company/${linkedin}`}`.replace(/\/$/, '')
+        : undefined,
+      crunchbase: crunchbase
+        ? `https://www.crunchbase.com/organization/${crunchbase.replace(/^organization\//, '')}`
+        : undefined,
+    };
+  }
+
+  /**
    * How much this candidate looks like the company we asked about.
    *
    * A bare name search for "Apple" returns the fruit, the record label and the
@@ -216,12 +278,17 @@ class FirmographicsFetcher {
    * tell "no public record exists" from "both APIs were throttling us" will
    * cache the throttling as an answer - which is exactly how an account ends up
    * with a permanently blank cover.
+   *
+   * @param {object} [options]
+   * @param {string} [options.wikidataId] the entity the account was picked from
+   *   in the search box. Given it, the name search - and the chance of matching
+   *   a different company that shares the name - is skipped entirely.
    */
-  async fetch(companyName, ticker) {
+  async fetch(companyName, ticker, { wikidataId } = {}) {
     if (!companyName) return null;
 
     const [wikidata, infobox] = await Promise.allSettled([
-      this.fromWikidata(companyName, ticker),
+      this.fromWikidata(companyName, ticker, wikidataId),
       infoboxFetcher.fetch(companyName),
     ]);
 
@@ -282,7 +349,15 @@ class FirmographicsFetcher {
   }
 
   /** Throws when the lookup fails; resolves null when nothing matches. */
-  async fromWikidata(companyName, ticker) {
+  async fromWikidata(companyName, ticker, wikidataId) {
+    // The rep already told us which company this is by picking it out of the
+    // suggestions, so that entity is read straight off rather than searched for
+    if (wikidataId) {
+      const picked = (await this.entities([wikidataId], 'claims'))[wikidataId];
+      if (picked?.claims) return await this.extract(picked, companyName);
+      console.warn(`⚠️ Wikidata has no entity ${wikidataId}, falling back to a name search`);
+    }
+
     const candidateIds = await this.search(companyName);
     if (!candidateIds.length) return null;
 
@@ -371,6 +446,7 @@ class FirmographicsFetcher {
       foundedYear: foundedYear ? Number(foundedYear) : undefined,
       website: this.best(claims[P.website])?.mainsnak?.datavalue?.value || undefined,
       logoUrl: this.commonsImage(this.best(claims[P.logo])?.mainsnak?.datavalue?.value),
+      profiles: this.profileUrls(claims),
       wikidataId: entity.id,
       source: 'Wikidata',
     };

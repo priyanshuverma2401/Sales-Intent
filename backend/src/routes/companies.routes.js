@@ -96,6 +96,8 @@ router.get('/search', authenticate, async (req, res) => {
         industry: c.industry,
         // Shown as a domain so a saved account reads the same as a suggestion
         website: companyDataFetcher.hostname(c.website),
+        logoUrl: c.logoUrl || companyDataFetcher.faviconUrl(companyDataFetcher.hostname(c.website)),
+        wikidataId: c.wikidataId,
         source: 'local',
       })),
       ...wikiResults.map(w => ({
@@ -103,6 +105,11 @@ router.get('/search', authenticate, async (req, res) => {
         source: w.source,
         snippet: w.snippet,
         website: w.website,
+        logoUrl: w.logoUrl,
+        ticker: w.ticker,
+        // Carried back on "add" so the account is enriched from the entity the
+        // rep actually picked, not from a fresh search for its name
+        wikidataId: w.wikidataId,
       })),
     ];
 
@@ -125,7 +132,7 @@ router.get('/search', authenticate, async (req, res) => {
 // caller opts out.
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { name, ticker, notes, generateReport = true } = req.body;
+    const { name, ticker, notes, wikidataId, generateReport = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Company name required' });
@@ -136,7 +143,10 @@ router.post('/', authenticate, async (req, res) => {
     if (!company) {
       console.log(`📊 Fetching data for new company: ${name}`);
 
-      const companyInfo = await companyDataFetcher.fetchCompanyInfo(name, ticker);
+      // The suggestion the rep picked names the exact entity, so enrichment
+      // skips the name search that used to decide between the four companies
+      // called HDFC on its own
+      const companyInfo = await companyDataFetcher.fetchCompanyInfo(name, ticker, { wikidataId });
       const financialData = ticker ? await financialDataFetcher.fetchFinancialData(ticker) : {};
       const { stock, financials } = splitFinancialPayload(financialData);
 
@@ -149,6 +159,8 @@ router.post('/', authenticate, async (req, res) => {
         employees: companyInfo.employees,
         foundedYear: companyInfo.foundedYear,
         logoUrl: companyInfo.logo,
+        profiles: companyInfo.profiles,
+        wikidataId: companyInfo.wikidataId || wikidataId,
         city: companyInfo.city,
         country: companyInfo.country || 'Unknown',
         financials: {

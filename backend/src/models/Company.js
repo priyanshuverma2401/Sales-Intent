@@ -18,6 +18,18 @@ const companySchema = new mongoose.Schema({
   description: String,
   logoUrl: String,
 
+  // The company's own page on each site, resolved from the identifiers Wikidata
+  // states rather than guessed from the name. Quick Links falls back to a search
+  // URL only when these are unknown - neither site can be reached by name.
+  profiles: {
+    linkedin: String,
+    crunchbase: String,
+  },
+  // The entity every firmographic here came from. Stored so a refresh reads the
+  // same company back instead of re-running a name search that may land on a
+  // different one.
+  wikidataId: String,
+
   // Financial Data
   financials: {
     marketCap: Number,

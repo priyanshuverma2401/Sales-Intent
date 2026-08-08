@@ -49,6 +49,14 @@ class ReportService {
     };
   }
 
+  /**
+   * The links on the report cover.
+   *
+   * LinkedIn and Crunchbase are both reachable only by their own identifier, so
+   * these open the company's own page when Wikidata stated one for the account
+   * and fall back to a search otherwise - said as much in the label, since
+   * clicking "LinkedIn" and landing on a list of 1,700 results reads as a bug.
+   */
   buildQuickLinks(company) {
     const links = [];
 
@@ -64,14 +72,25 @@ class ReportService {
         url: `https://finance.yahoo.com/quote/${company.ticker}`,
       });
     }
-    links.push({
-      label: 'Crunchbase',
-      url: `https://www.crunchbase.com/textsearch?q=${encodeURIComponent(company.name)}`,
-    });
-    links.push({
-      label: 'LinkedIn',
-      url: `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(company.name)}`,
-    });
+
+    const profiles = company.profiles || {};
+
+    links.push(
+      profiles.crunchbase
+        ? { label: 'Crunchbase', url: profiles.crunchbase }
+        : {
+            label: 'Search Crunchbase',
+            url: `https://www.crunchbase.com/textsearch?q=${encodeURIComponent(company.name)}`,
+          }
+    );
+    links.push(
+      profiles.linkedin
+        ? { label: 'LinkedIn', url: profiles.linkedin }
+        : {
+            label: 'Search LinkedIn',
+            url: `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(company.name)}`,
+          }
+    );
 
     return links;
   }

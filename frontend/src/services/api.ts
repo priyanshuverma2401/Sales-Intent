@@ -168,6 +168,9 @@ export const companiesAPI = {
     name: string;
     ticker?: string;
     notes?: string;
+    // The Wikidata entity behind the picked suggestion, so the server enriches
+    // that exact company instead of searching its name again
+    wikidataId?: string;
     generateReport?: boolean;
   }) => API.post('/companies', payload),
   getCompany: (id: string) => API.get(`/companies/${id}`),

@@ -11,6 +11,40 @@ interface SearchResult {
   source?: string;
   snippet?: string;
   website?: string;
+  logoUrl?: string;
+  wikidataId?: string;
+}
+
+/**
+ * The company's mark, or its initial while one loads and after one fails.
+ *
+ * A logo is the fastest way to tell the Microsoft you meant from the four
+ * showcase pages that share its name, but the sources behind them - Wikimedia
+ * Commons and site favicons - both 404 often enough that a broken image icon
+ * would be a regular sight without this.
+ */
+function CompanyMark({ name, logoUrl }: { name: string; logoUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [logoUrl]);
+
+  if (logoUrl && !failed) {
+    return (
+      <img
+        src={logoUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-8 w-8 shrink-0 rounded-md border border-slate-200 bg-white object-contain p-0.5"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-ink-faint">
+      {name?.trim()?.[0] || <Building2 size={14} />}
+    </div>
+  );
 }
 
 /**
@@ -90,6 +124,9 @@ export default function AddAccountModal({
       const res = await companiesAPI.addCompany({
         name,
         ticker: selected?.ticker || undefined,
+        // Which company was picked, not just what it is called - the server
+        // enriches from this entity rather than searching the name again
+        wikidataId: selected?.wikidataId || undefined,
         generateReport: true,
       });
 
@@ -131,9 +168,7 @@ export default function AddAccountModal({
         {selected ? (
           <div className="flex animate-scale-in items-start justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3.5">
             <div className="flex min-w-0 gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface shadow-card">
-                <Building2 size={17} className="text-brand-600" />
-              </div>
+              <CompanyMark name={selected.name} logoUrl={selected.logoUrl} />
               <div className="min-w-0">
                 <p className="truncate font-semibold text-ink">{selected.name}</p>
                 {/* Website first: it is the one line that confirms the right
@@ -188,7 +223,7 @@ export default function AddAccountModal({
                     onClick={() => choose(result)}
                     className="flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-2.5 text-left transition last:border-0 hover:bg-brand-50"
                   >
-                    <Building2 size={15} className="mt-0.5 shrink-0 text-ink-faint" />
+                    <CompanyMark name={result.name} logoUrl={result.logoUrl} />
                     <div className="min-w-0 flex-1">
                       <p className="flex items-baseline gap-2 text-sm font-medium text-ink">
                         <span className="truncate">{result.name}</span>
@@ -215,6 +250,15 @@ export default function AddAccountModal({
                   </button>
                 ))}
               </div>
+            )}
+
+            {/* Plenty of prospects have no public record to suggest from. Saying
+                so beats an empty box that reads as a broken search. */}
+            {!searching && !results.length && query.trim().length >= 2 && (
+              <p className="mt-2 text-xs text-ink-muted">
+                No matches for “{query.trim()}”. Add it anyway — we will research it from its
+                name.
+              </p>
             )}
           </Field>
         )}

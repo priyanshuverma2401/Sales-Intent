@@ -20,6 +20,15 @@ function canRead(report, req) {
   return isAuthor(report, req) || sameOrg(report, req);
 }
 
+// Quick Links compared by what they point at, so a stored list is only
+// rewritten when it genuinely differs
+function sameLinks(a = [], b = []) {
+  const flatten = links =>
+    (links || []).map(link => `${link.label}|${link.url}`).join('\n');
+
+  return flatten(a) === flatten(b);
+}
+
 // Deleting is the asymmetric one: an owner may remove anything in the tenant,
 // a member may only remove what they generated themselves.
 function canDelete(report, req) {
@@ -199,14 +208,24 @@ router.get('/:id', authenticate, async (req, res) => {
       report.userId
         ? User.findById(report.userId).select('firstName lastName email')
         : null,
-      // Only needed when the report predates accountAddedAt being stamped on it
-      report.accountAddedAt || !report.companyId
-        ? null
-        : Company.findById(report.companyId).select('addedAt'),
+      report.companyId
+        ? Company.findById(report.companyId).select('addedAt name website ticker profiles')
+        : null,
     ]);
+
+    // Rebuilt from the account rather than served as stored: Quick Links are a
+    // pure function of the company, and a report written before its LinkedIn
+    // and Crunchbase pages were known would otherwise keep pointing at a search
+    // results page forever. Written back when it changes, so the public API and
+    // any later render see the repaired links too.
+    const quickLinks = company ? reportService.buildQuickLinks(company) : report.quickLinks;
+    if (company && !sameLinks(quickLinks, report.quickLinks)) {
+      Report.updateOne({ _id: report._id }, { $set: { quickLinks } }).catch(() => {});
+    }
 
     res.json({
       ...report.toObject(),
+      quickLinks,
       accountAddedAt: report.accountAddedAt || company?.addedAt || null,
       author: author
         ? {
