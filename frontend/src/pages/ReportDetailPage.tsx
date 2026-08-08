@@ -16,7 +16,6 @@ import {
   MapPin,
   Printer,
   RefreshCw,
-  Sparkles,
   TrendingUp,
   User,
   Users,
@@ -365,8 +364,10 @@ export default function ReportDetailPage() {
 
       {/* ---------------- Cover ---------------- */}
       <Card className="mb-5 animate-fade-in-up overflow-hidden print-block">
+        {/* No border-b: with "Written for you" gone this is the only block in
+            the cover card */}
         <div
-          className="relative border-b border-slate-100 p-6 sm:p-8"
+          className="relative p-6 sm:p-8"
           style={{
             backgroundImage:
               'linear-gradient(135deg, rgb(37 99 235 / 0.06) 0%, rgb(99 102 241 / 0.04) 40%, transparent 70%)',
@@ -403,14 +404,48 @@ export default function ReportDetailPage() {
               </div>
             </div>
 
-            {/* Score */}
+            {/* Score. The reasons behind it live in a hover card rather than a
+                section of their own - hover (or focus) the badge to see them. */}
             {report.score?.value ? (
-              <div className="flex shrink-0 flex-col items-center rounded-2xl border border-slate-200 bg-surface px-6 py-5 shadow-card">
+              <div
+                tabIndex={0}
+                className="group relative flex shrink-0 cursor-default flex-col items-center rounded-2xl border border-slate-200 bg-surface px-6 py-5 shadow-card outline-none transition hover:border-brand-300 focus-visible:ring-2 focus-visible:ring-brand-500/40"
+              >
                 <ScoreRing value={report.score.value} band={report.score.band} size={96} />
                 <p className="eyebrow mt-1.5 text-ink-faint">Fit score</p>
                 <p className="mt-1 max-w-[9rem] text-center text-2xs leading-snug text-ink-muted">
                   How well they match what you sell
                 </p>
+
+                {(report.score.reasons?.length || report.score.summary) && (
+                  // pt-2 instead of mt-2 keeps the cursor inside the group
+                  // while it crosses from the badge to the card, so the
+                  // tooltip does not flicker shut on the way down
+                  <div className="no-print invisible absolute right-0 top-full z-30 w-[26rem] max-w-[80vw] pt-2 opacity-0 transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                    <div className="rounded-xl border border-slate-200 bg-surface p-4 text-left shadow-pop">
+                      <h3 className="mb-2 text-2xs font-bold uppercase tracking-[0.12em] text-ink-faint">
+                        Why we gave this score
+                      </h3>
+                      {report.score.reasons?.length ? (
+                        <ul className="space-y-1.5">
+                          {report.score.reasons.map((reason: string, i: number) => (
+                            <li
+                              key={i}
+                              className="flex gap-2 text-[13px] leading-relaxed text-ink-soft"
+                            >
+                              <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
+                              {reason}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-[13px] leading-relaxed text-ink-soft">
+                          {report.score.summary}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -522,71 +557,6 @@ export default function ReportDetailPage() {
           </div>
         </div>
 
-        {/* Lens + score reasons */}
-        <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1.4fr_1fr]">
-          <div>
-            <h3 className="eyebrow mb-3 flex items-center gap-1.5 text-brand-600">
-              <Sparkles size={13} /> Written for you
-            </h3>
-            <dl className="space-y-2.5 text-[13px]">
-              {context.sellerName && <ContextRow label="Your company" value={context.sellerName} />}
-              {context.priorityTopics?.length ? (
-                <div className="flex gap-3">
-                  <dt className="w-28 shrink-0 font-semibold text-ink-faint">Top priorities</dt>
-                  <dd className="flex flex-wrap gap-1.5">
-                    {context.priorityTopics.map((topic: string) => (
-                      <span
-                        key={topic}
-                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"
-                      >
-                        {topic}
-                      </span>
-                    ))}
-                  </dd>
-                </div>
-              ) : null}
-              {context.topics?.length ? (
-                <div className="flex gap-3">
-                  <dt className="w-28 shrink-0 font-semibold text-ink-faint">Also watching</dt>
-                  <dd className="flex flex-wrap gap-1.5">
-                    {context.topics.map((topic: string) => (
-                      <span
-                        key={topic}
-                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200"
-                      >
-                        {topic}
-                      </span>
-                    ))}
-                  </dd>
-                </div>
-              ) : null}
-              {context.sellerCapabilities?.length ? (
-                <ContextRow label="What you sell" value={context.sellerCapabilities.join(', ')} />
-              ) : null}
-              {context.technologies?.length ? (
-                <ContextRow label="Tech you work with" value={context.technologies.join(', ')} />
-              ) : null}
-            </dl>
-
-            {report.score?.summary && (
-              <p className="mt-4 rounded-xl bg-surface-2 px-4 py-3 text-[13.5px] leading-relaxed text-ink-soft ring-1 ring-inset ring-slate-200/70">
-                {report.score.summary}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <h3 className="eyebrow mb-3 text-ink-faint">Why we gave this score</h3>
-            <ul className="space-y-1.5">
-              {(report.score?.reasons || []).map((reason: string, i: number) => (
-                <li key={i} className="flex gap-2 text-[13px] leading-relaxed text-ink-soft">
-                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
-                  {reason}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
       </Card>
 
       {/* ---------------- Jump links ---------------- */}
@@ -883,11 +853,3 @@ function FactRow({
   );
 }
 
-function ContextRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-3">
-      <dt className="w-28 shrink-0 font-semibold text-ink-faint">{label}</dt>
-      <dd className="min-w-0 text-ink-soft">{value}</dd>
-    </div>
-  );
-}
