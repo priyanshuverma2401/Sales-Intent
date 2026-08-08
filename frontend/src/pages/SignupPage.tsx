@@ -111,9 +111,9 @@ export default function SignupPage() {
     <AuthShell
       wide
       title="Create your account"
-      subtitle="One step. Your reports are already targeted by your company profile."
+      subtitle="One step, and you are in. Your reports are already set up around what your company sells."
       aside={{
-        heading: 'Your company’s pitch, on every account.',
+        heading: 'Your company’s pitch, on every deal.',
         points: [
           'Reports are written from your company profile — what you sell and the topics you monitor.',
           'Topics your admin marks high priority lead every report.',

@@ -68,7 +68,7 @@ export function Citations({
             target="_blank"
             rel="noopener noreferrer"
             title={source.title}
-            className="rounded bg-brand-50 px-1 text-[10px] font-bold text-brand-600 transition hover:bg-brand-100"
+            className="rounded bg-brand-50 px-1 text-[10px] font-bold text-brand-600 ring-1 ring-inset ring-brand-200 transition hover:bg-brand-100"
           >
             {label}
           </a>
@@ -90,7 +90,7 @@ export function InsightList({
   items,
   sources,
   tone = 'brand',
-  empty = 'No supporting evidence was found for this section.',
+  empty = 'We could not find anything solid to say here yet.',
 }: {
   items?: Insight[];
   sources: Source[];
@@ -146,7 +146,7 @@ export function TalkingPointList({
   if (!items?.length) {
     return (
       <p className="text-[13px] italic text-ink-faint">
-        No supporting evidence was found for this section.
+        We could not find anything solid to say here yet.
       </p>
     );
   }
@@ -156,10 +156,10 @@ export function TalkingPointList({
       {items.map((item, i) => (
         <li
           key={i}
-          className="print-block rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3.5"
+          className="print-block rounded-xl border border-slate-200 bg-surface-2 px-4 py-3.5 transition duration-200 ease-swift hover:border-brand-200 hover:shadow-card"
         >
           <div className="flex gap-3">
-            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-500 text-[11px] font-bold text-white">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-gradient text-[11px] font-bold text-white shadow-sm">
               {i + 1}
             </span>
 
@@ -177,8 +177,8 @@ export function TalkingPointList({
 
               {(item.question || item.proof || item.objection) && (
                 <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
-                  <Cue label="Ask" text={item.question} tone="text-brand-700" />
-                  <Cue label="Proof" text={item.proof} tone="text-emerald-700" />
+                  <Cue label="Ask them" text={item.question} tone="text-brand-700" />
+                  <Cue label="Back it up with" text={item.proof} tone="text-emerald-700" />
                   <Cue label="If they push back" text={item.objection} tone="text-amber-700" />
                 </div>
               )}
@@ -203,10 +203,12 @@ export function ReportSection({
 }) {
   return (
     <section id={id} className="scroll-mt-24">
-      <div className="card card-pad">
+      <div className="card card-pad hover:shadow-raised">
         <div className="mb-4 border-b border-slate-100 pb-3">
-          <h2 className="text-[17px] font-bold tracking-tight text-ink">{title}</h2>
-          {description && <p className="mt-0.5 text-[13px] text-ink-muted">{description}</p>}
+          <h2 className="text-[17px] font-bold tracking-tighter text-ink">{title}</h2>
+          {description && (
+            <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">{description}</p>
+          )}
         </div>
         {children}
       </div>
@@ -260,7 +262,7 @@ export function QuoteCard({
   source?: string;
 }) {
   return (
-    <figure className="print-block rounded-lg border-l-[3px] border-brand-500 bg-slate-50 px-5 py-4">
+    <figure className="print-block rounded-xl border-l-[3px] border-brand-500 bg-surface-2 px-5 py-4 ring-1 ring-inset ring-slate-200/60">
       <blockquote className="text-[15px] italic leading-relaxed text-ink">“{quote}”</blockquote>
       <figcaption className="mt-2.5 text-[13px] text-ink-muted">
         — {[person, title, source].filter(Boolean).join(', ')}
@@ -271,7 +273,9 @@ export function QuoteCard({
 
 export function NewsList({ items, sources }: { items?: any[]; sources: Source[] }) {
   if (!items?.length) {
-    return <p className="text-[13px] italic text-ink-faint">No recent coverage was found.</p>;
+    return (
+      <p className="text-[13px] italic text-ink-faint">We did not find any recent coverage.</p>
+    );
   }
 
   return (
@@ -321,7 +325,11 @@ export function NewsList({ items, sources }: { items?: any[]; sources: Source[] 
 
 export function SourcesList({ sources }: { sources: Source[] }) {
   if (!sources.length) {
-    return <p className="text-[13px] italic text-ink-faint">No external sources were retrieved.</p>;
+    return (
+      <p className="text-[13px] italic text-ink-faint">
+        We did not pull in any outside sources for this one.
+      </p>
+    );
   }
 
   return (

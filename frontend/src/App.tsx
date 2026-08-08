@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAuthStore } from './store/authStore';
 import { authAPI } from './services/api';
 
@@ -26,9 +27,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // while this is still in flight logged the user out on every page refresh.
   if (isBootstrapping) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
-        <Logo />
-        <p className="text-sm text-ink-muted">Loading your workspace…</p>
+      <div className="page-wash flex min-h-screen flex-col items-center justify-center gap-5">
+        <div className="animate-fade-in-up">
+          <Logo />
+        </div>
+        <div
+          className="flex animate-fade-in-up items-center gap-2.5 text-sm font-medium text-ink-muted"
+          style={{ animationDelay: '120ms' }}
+        >
+          <Loader2 size={15} className="animate-spin text-brand-500" />
+          Getting your workspace ready…
+        </div>
       </div>
     );
   }

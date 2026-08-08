@@ -1,16 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, BellOff, Plus, Trash2 } from 'lucide-react';
 import { alertsAPI, apiError, companiesAPI } from '../services/api';
-import { Alert, Badge, Button, Card, EmptyState, Field, Modal, PageHeader, SkeletonRows } from '../components/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Modal,
+  PageHeader,
+  SkeletonRows,
+  stagger,
+} from '../components/ui';
 
 const TRIGGER_TYPES = [
-  { value: 'all_signals', label: 'Any new signal' },
-  { value: 'signal_type', label: 'Specific signal type' },
-  { value: 'keyword', label: 'Keyword match' },
-  { value: 'price_threshold', label: 'Price threshold' },
+  { value: 'all_signals', label: 'Anything new happens' },
+  { value: 'signal_type', label: 'A particular kind of news' },
+  { value: 'keyword', label: 'A word or phrase is mentioned' },
+  { value: 'price_threshold', label: 'The share price passes a number' },
 ];
 
-const ALERT_TYPES = ['signal', 'news', 'earnings', 'hiring', 'price_change', 'custom'];
+// Values are what the API stores; only the labels are written for a reader.
+const ALERT_TYPES = [
+  { value: 'signal', label: 'Any update' },
+  { value: 'news', label: 'News' },
+  { value: 'earnings', label: 'Earnings' },
+  { value: 'hiring', label: 'Hiring' },
+  { value: 'price_change', label: 'Share price change' },
+  { value: 'custom', label: 'Something else' },
+];
+
+const TRIGGER_LABELS: Record<string, string> = Object.fromEntries(
+  TRIGGER_TYPES.map((t) => [t.value, t.label])
+);
+const TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  ALERT_TYPES.map((t) => [t.value, t.label])
+);
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -51,7 +77,7 @@ export default function AlertsPage() {
         ...form,
         companyId: form.companyId || undefined,
         companyName: selected?.name,
-        title: form.title || `Alert for ${selected?.name || 'all accounts'}`,
+        title: form.title || `Alert for ${selected?.name || 'all companies'}`,
       });
 
       setForm({ companyId: '', title: '', type: 'signal', triggerType: 'all_signals', triggerValue: '' });
@@ -87,8 +113,8 @@ export default function AlertsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         eyebrow="Automation"
-        title="Alerts"
-        description="Rules that flag the account events you care about."
+        title="Alert rules"
+        description="Tell us what to watch for, and we will flag it the moment it shows up."
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
             New alert
@@ -109,8 +135,8 @@ export default function AlertsPage() {
       ) : alerts.length === 0 ? (
         <EmptyState
           icon={Bell}
-          title="No alerts configured"
-          description="Create a rule to be told when an account does something worth a call."
+          title="No alerts set up yet"
+          description="Create a rule and we will tell you when one of your companies does something worth a call."
           action={
             <Button icon={Plus} onClick={() => setModalOpen(true)}>
               Create an alert
@@ -118,31 +144,38 @@ export default function AlertsPage() {
           }
         />
       ) : (
-        <div className="space-y-3">
-          {alerts.map((alert) => (
-            <Card key={alert._id} className="flex items-start justify-between gap-4 p-5">
+        <div className="stagger space-y-3">
+          {alerts.map((alert, i) => (
+            <Card
+              key={alert._id}
+              style={stagger(i)}
+              className="flex items-start justify-between gap-4 p-5 hover:shadow-raised"
+            >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-[15px] font-bold text-ink">
                     {alert.title || alert.companyName || 'Untitled alert'}
                   </h3>
                   <Badge tone={alert.isActive ? 'green' : 'neutral'}>
-                    {alert.isActive ? 'Active' : 'Paused'}
+                    {alert.isActive ? 'On' : 'Paused'}
                   </Badge>
-                  <Badge tone="brand">{alert.type}</Badge>
+                  <Badge tone="brand">{TYPE_LABELS[alert.type] || alert.type}</Badge>
                 </div>
                 <p className="mt-1.5 text-[13px] text-ink-muted">
-                  Trigger: {alert.triggerType || 'all_signals'}
-                  {alert.triggerValue ? ` — ${alert.triggerValue}` : ''}
-                  {alert.companyName ? ` · ${alert.companyName}` : ' · all accounts'}
+                  Tells you when{' '}
+                  <span className="font-medium text-ink-soft">
+                    {(TRIGGER_LABELS[alert.triggerType] || TRIGGER_LABELS.all_signals).toLowerCase()}
+                  </span>
+                  {alert.triggerValue ? ` — “${alert.triggerValue}”` : ''}
+                  {alert.companyName ? ` at ${alert.companyName}` : ' at any of your companies'}
                 </p>
               </div>
 
               <div className="flex shrink-0 gap-1">
                 <button
                   onClick={() => toggle(alert._id)}
-                  title={alert.isActive ? 'Pause' : 'Activate'}
-                  className="rounded-lg p-2 text-ink-faint transition hover:bg-slate-100 hover:text-ink"
+                  title={alert.isActive ? 'Pause this alert' : 'Turn this alert on'}
+                  className="rounded-lg p-2 text-ink-faint transition hover:bg-slate-100 hover:text-ink active:scale-95"
                 >
                   {alert.isActive ? <BellOff size={16} /> : <Bell size={16} />}
                 </button>
@@ -159,16 +192,16 @@ export default function AlertsPage() {
         </div>
       )}
 
-      <p className="mt-6 text-[13px] text-ink-muted">
-        Alerts are stored here, but nothing evaluates them on a schedule yet — signals are collected
-        when you refresh an account.
+      <p className="mt-6 rounded-xl border border-slate-200/70 bg-surface/60 px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
+        Your alert rules are saved, but nothing checks them on a schedule yet — we gather updates
+        when you choose “Check for news” on a company.
       </p>
 
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title="Create an alert"
-        description="Tell us what to watch for across your accounts."
+        description="Tell us what to watch for across your companies."
         footer={
           <>
             <Button variant="secondary" onClick={() => setModalOpen(false)}>
@@ -181,13 +214,13 @@ export default function AlertsPage() {
         }
       >
         <form onSubmit={create} className="space-y-5">
-          <Field label="Account">
+          <Field label="Which company?" hint="Leave this on “All my companies” to watch everything.">
             <select
               className="input"
               value={form.companyId}
               onChange={(e) => setForm({ ...form, companyId: e.target.value })}
             >
-              <option value="">All accounts</option>
+              <option value="">All my companies</option>
               {companies.map((c: any) => (
                 <option key={c._id} value={c._id}>
                   {c.name}
@@ -196,7 +229,7 @@ export default function AlertsPage() {
             </select>
           </Field>
 
-          <Field label="Alert name">
+          <Field label="Give it a name" hint="Just so you can recognise it later.">
             <input
               className="input"
               placeholder="e.g. Earnings watch"
@@ -206,21 +239,21 @@ export default function AlertsPage() {
           </Field>
 
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Category">
+            <Field label="What kind of update?">
               <select
                 className="input"
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value })}
               >
                 {ALERT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+                  <option key={t.value} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </select>
             </Field>
 
-            <Field label="Trigger">
+            <Field label="Tell me when…">
               <select
                 className="input"
                 value={form.triggerType}
@@ -236,7 +269,9 @@ export default function AlertsPage() {
           </div>
 
           {form.triggerType !== 'all_signals' && (
-            <Field label="Trigger value">
+            <Field
+              label={form.triggerType === 'price_threshold' ? 'Which price?' : 'Which word or phrase?'}
+            >
               <input
                 className="input"
                 placeholder={form.triggerType === 'price_threshold' ? 'e.g. 250' : 'e.g. acquisition'}

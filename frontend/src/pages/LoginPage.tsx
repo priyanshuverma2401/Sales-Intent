@@ -36,11 +36,11 @@ type Stage = 'email' | 'password' | 'contact-admin' | 'demo' | 'demo-sent';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
 
 const DEMO_PANEL = {
-  heading: 'See what SalesMotion writes about the accounts you are chasing.',
+  heading: 'See what SalesMotion writes about the companies you are chasing.',
   points: [
-    'A 30-minute walkthrough on your own target accounts, not a canned demo deck.',
-    'We set your company profile up with you so the first report is already on-message.',
-    'Seats for your whole team once you are in - no per-person setup.',
+    'A 30-minute walkthrough on your own target companies, not a canned demo deck.',
+    'We set your business profile up with you, so your very first report lands on-message.',
+    'Everyone on your team gets access once you are in — no setup per person.',
   ],
 };
 
@@ -273,7 +273,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm">
+          <div className="space-y-2 rounded-xl border border-slate-200 bg-surface-2 px-5 py-4 text-sm">
             <p className="flex items-center gap-2.5 text-ink-soft">
               <Mail size={15} className="shrink-0 text-ink-faint" />
               <span className="truncate">{form.email}</span>
@@ -313,13 +313,13 @@ export default function LoginPage() {
         <form onSubmit={submitDemo} className="animate-fade-in space-y-5">
           {error && <Alert tone="error">{error}</Alert>}
 
-          <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5">
+          <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-surface-2 px-4 py-3.5">
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
               <Sparkles size={16} />
             </span>
             <p className="text-[13px] leading-relaxed text-ink-muted">
-              We'll walk you through SalesMotion on your own target accounts, then get your company
-              profile set up so your team can start straight away.
+              We'll walk you through SalesMotion using your own target companies, then set up your
+              business profile so your team can start straight away.
             </p>
           </div>
 

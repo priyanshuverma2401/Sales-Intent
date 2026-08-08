@@ -21,9 +21,10 @@ import {
   Button,
   EmptyState,
   PageHeader,
+  ProgressBar,
   ScoreRing,
   SkeletonRows,
-  cx,
+  stagger,
 } from '../components/ui';
 
 interface Account {
@@ -119,7 +120,7 @@ export default function AccountsPage() {
       const res = await companiesAPI.refreshData(account._id);
       setMessage({
         tone: 'success',
-        text: `${account.name}: ${res.data.signalsCreated ?? 0} new signals from ${res.data.newsFound ?? 0} articles`,
+        text: `${account.name}: found ${res.data.signalsCreated ?? 0} new updates across ${res.data.newsFound ?? 0} articles`,
       });
       load(true);
     } catch (err) {
@@ -135,18 +136,18 @@ export default function AccountsPage() {
       await reportsAPI.generate(account._id);
       setMessage({
         tone: 'info',
-        text: `Generating a ${lens.join(' / ') || 'capability'} report for ${account.name} — about a minute.`,
+        text: `Writing a ${lens.join(' / ') || 'fit'} report for ${account.name}. This takes about a minute.`,
       });
       load(true);
     } catch (err) {
-      setMessage({ tone: 'error', text: apiError(err, 'Could not start the report') });
+      setMessage({ tone: 'error', text: apiError(err, 'We could not start the report') });
     } finally {
       setBusyId(null);
     }
   };
 
   const remove = async (account: Account) => {
-    if (!window.confirm(`Remove ${account.name} from your accounts?`)) return;
+    if (!window.confirm(`Remove ${account.name} from your companies?`)) return;
     try {
       setBusyId(account._id);
       await companiesAPI.removeCompany(account._id);
@@ -162,12 +163,12 @@ export default function AccountsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Pipeline"
+        eyebrow="Your pipeline"
         title="Accounts"
-        description="Every prospect you are working, scored against what you sell."
+        description="Every company you are working on, scored on how well they fit what you sell."
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
-            Add account
+            Add a company
           </Button>
         }
       />
@@ -182,15 +183,13 @@ export default function AccountsPage() {
 
       {/* The shared lens, stated once */}
       {lens.length > 0 && (
-        <div className="mb-5 flex flex-wrap items-center gap-1.5">
+        <div className="mb-5 flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200/70 bg-surface/60 px-3.5 py-2.5">
           <Sparkles size={13} className="text-brand-500" />
-          <span className="text-2xs font-bold uppercase tracking-wider text-ink-faint">
-            Every account is read for
-          </span>
+          <span className="eyebrow text-ink-faint">We check every company for</span>
           {lens.map((topic) => (
             <span
               key={topic}
-              className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+              className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200"
             >
               {topic}
             </span>
@@ -209,7 +208,7 @@ export default function AccountsPage() {
             />
             <input
               className="input pl-9"
-              placeholder="Search accounts by name, ticker, industry or country…"
+              placeholder="Search by company name, ticker, industry or country…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -224,8 +223,8 @@ export default function AccountsPage() {
             </button>
           )}
 
-          <span className="ml-auto shrink-0 text-[13px] text-ink-muted">
-            {search ? `${accounts.length} of ${total}` : `${total} accounts`}
+          <span className="ml-auto shrink-0 text-[13px] font-medium text-ink-muted">
+            {search ? `${accounts.length} of ${total}` : `${total} companies`}
           </span>
         </div>
       )}
@@ -235,8 +234,8 @@ export default function AccountsPage() {
       ) : accounts.length === 0 && search ? (
         <EmptyState
           icon={Search}
-          title="No accounts match that search"
-          description={`Nothing in your pipeline matches "${search}".`}
+          title="No companies match that search"
+          description={`Nothing in your pipeline matches “${search}”.`}
           action={
             <Button variant="secondary" icon={X} onClick={() => setQuery('')}>
               Clear search
@@ -246,33 +245,37 @@ export default function AccountsPage() {
       ) : accounts.length === 0 ? (
         <EmptyState
           icon={Building2}
-          title="No accounts yet"
-          description="Add a company and we will research it against your company profile — what you sell and the topics you monitor — then build the report."
+          title="No companies yet"
+          description="Add a company and we will research it against your business profile — what you sell and the topics you care about — then write the report for you."
           action={
             <Button icon={Plus} onClick={() => setModalOpen(true)}>
-              Add your first account
+              Add your first company
             </Button>
           }
         />
       ) : (
-        <div className="space-y-4">
-          {accounts.map((account) => {
+        <div className="stagger space-y-4">
+          {accounts.map((account, i) => {
             const report = account.latestReport;
             const busy = busyId === account._id;
 
             return (
-              <div key={account._id} className="card overflow-hidden">
+              <div
+                key={account._id}
+                style={stagger(i)}
+                className="card overflow-hidden hover:border-slate-300 hover:shadow-raised"
+              >
                 <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-start">
                   {/* Score */}
                   <div className="flex shrink-0 items-center gap-4 lg:w-[112px] lg:flex-col lg:items-center">
                     {report?.status === 'complete' && report.score ? (
                       <ScoreRing value={report.score} band={report.band} size={82} />
                     ) : (
-                      <div className="flex h-[82px] w-[82px] items-center justify-center rounded-full border-2 border-dashed border-slate-200">
+                      <div className="flex h-[82px] w-[82px] items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-slate-50/50">
                         {report?.status === 'pending' ? (
                           <Loader2 size={20} className="animate-spin text-brand-500" />
                         ) : (
-                          <span className="text-2xs font-semibold text-ink-faint">No score</span>
+                          <span className="text-2xs font-semibold text-ink-faint">Not scored</span>
                         )}
                       </div>
                     )}
@@ -288,20 +291,24 @@ export default function AccountsPage() {
                         </span>
                       )}
                       {account.signalCount > 0 && (
-                        <Badge tone="amber">{account.signalCount} signals</Badge>
+                        <Badge tone="amber">
+                          {account.signalCount} {account.signalCount === 1 ? 'update' : 'updates'}
+                        </Badge>
                       )}
                       {report?.status === 'pending' && (
                         <Badge tone="brand">
                           <Loader2 size={10} className="animate-spin" />
-                          {report.progress?.step || 'Generating'}
+                          {report.progress?.step || 'Writing report'}
                         </Badge>
                       )}
-                      {report?.status === 'failed' && <Badge tone="red">Report failed</Badge>}
+                      {report?.status === 'failed' && (
+                        <Badge tone="red">Report did not finish</Badge>
+                      )}
                     </div>
 
                     <p className="mt-1 text-[13px] text-ink-muted">
                       {[account.industry, account.country].filter(Boolean).join(' · ') ||
-                        'No industry data yet'}
+                        'We are still gathering details'}
                     </p>
 
                     {account.description && (
@@ -367,7 +374,7 @@ export default function AccountsPage() {
                         onClick={() => generate(account)}
                         className="lg:w-full"
                       >
-                        {report?.status === 'pending' ? 'Generating…' : 'Generate report'}
+                        {report?.status === 'pending' ? 'Writing…' : 'Create report'}
                       </Button>
                     )}
 
@@ -380,7 +387,7 @@ export default function AccountsPage() {
                         onClick={() => generate(account)}
                         className="lg:w-full"
                       >
-                        Regenerate
+                        Write a new one
                       </Button>
                     )}
 
@@ -392,7 +399,7 @@ export default function AccountsPage() {
                       onClick={() => refresh(account)}
                       className="lg:w-full"
                     >
-                      Refresh data
+                      Check for news
                     </Button>
 
                     <Button
@@ -410,12 +417,7 @@ export default function AccountsPage() {
 
                 {/* Progress strip while a report builds */}
                 {report?.status === 'pending' && (
-                  <div className="h-1 w-full bg-slate-100">
-                    <div
-                      className={cx('h-full bg-brand-500 transition-all duration-700')}
-                      style={{ width: `${report.progress?.percent || 10}%` }}
-                    />
-                  </div>
+                  <ProgressBar percent={report.progress?.percent} className="h-1 rounded-none" />
                 )}
               </div>
             );
@@ -436,7 +438,7 @@ export default function AccountsPage() {
           } else if (reportId) {
             setMessage({
               tone: 'info',
-              text: `${companyName} added — building your report now.`,
+              text: `${companyName} added — we are writing your report now.`,
             });
           } else {
             setMessage({ tone: 'success', text: `${companyName} added.` });
@@ -445,8 +447,8 @@ export default function AccountsPage() {
       />
 
       {accounts.length > 0 && (
-        <p className="mt-6 text-center text-[13px] text-ink-muted">
-          Change what every account is read for in the company profile under{' '}
+        <p className="mt-8 text-center text-[13px] text-ink-muted">
+          Want us to look for something else? Update what you sell and the topics you care about in{' '}
           <Link to="/settings" className="font-semibold text-brand-600 hover:underline">
             Settings
           </Link>

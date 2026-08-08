@@ -101,9 +101,9 @@ export default function OrgRegisterPage() {
     <AuthShell
       wide
       title="Register your company"
-      subtitle="Set up the subscription once. Your team then creates their own accounts with your work email domain."
+      subtitle="Set this up once. After that, anyone on your team with a matching work email can create their own account."
       aside={{
-        heading: 'Tell us what you sell. We will tell your team who needs it.',
+        heading: 'Tell us what you sell, and we will tell your team who needs it.',
         points: [
           'Your company profile is the lens for every report your team generates.',
           'Add relevant topics later and mark the ones that matter most as high priority.',
@@ -196,7 +196,7 @@ export default function OrgRegisterPage() {
 
             <Field
               label="What does your company do?"
-              hint="Two or three sentences. This grounds every report — the more specific, the sharper the output."
+              hint="Two or three sentences. This shapes every report — the more specific you are, the better they read."
             >
               <textarea
                 className="input"
@@ -218,9 +218,9 @@ export default function OrgRegisterPage() {
             </div>
 
             <Field
-              label="Capabilities you can deliver"
+              label="What you sell"
               required
-              hint="Press Enter after each. Add the ones you would put in a proposal."
+              hint="Press Enter after each one. Add what you would put in a proposal."
             >
               <TagInput
                 value={form.capabilities}
@@ -231,8 +231,8 @@ export default function OrgRegisterPage() {
             </Field>
 
             <Field
-              label="Capability detail"
-              hint="Named platforms, accelerators or methods your reps reference on calls."
+              label="Anything else worth naming"
+              hint="Platforms, tools or methods your team mentions on calls."
             >
               <textarea
                 className="input"
@@ -243,7 +243,7 @@ export default function OrgRegisterPage() {
               />
             </Field>
 
-            <Field label="Value propositions" hint="The outcomes you sell, not the services.">
+            <Field label="Promises you make" hint="The result a customer gets, not the service itself.">
               <TagInput
                 value={form.valuePropositions}
                 onChange={(valuePropositions) => set({ valuePropositions })}
@@ -251,7 +251,10 @@ export default function OrgRegisterPage() {
               />
             </Field>
 
-            <Field label="Proof points" hint="Results you can cite. These end up in the value story.">
+            <Field
+              label="Proof you can point to"
+              hint="Real numbers you can quote. We work these into the pitch section of every report."
+            >
               <TagInput
                 value={form.proofPoints}
                 onChange={(proofPoints) => set({ proofPoints })}
@@ -278,7 +281,10 @@ export default function OrgRegisterPage() {
               </Field>
             </div>
 
-            <Field label="Buyer roles" hint="Used to score whether a prospect is hiring into your buying centre.">
+            <Field
+              label="Job titles you sell to"
+              hint="We use these to spot when a company is hiring the people who would buy from you."
+            >
               <TagInput
                 value={form.targetRoles}
                 onChange={(targetRoles) => set({ targetRoles })}

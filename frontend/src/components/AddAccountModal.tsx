@@ -100,7 +100,7 @@ export default function AddAccountModal({
       });
       onClose();
     } catch (err) {
-      setError(apiError(err, 'Could not add this account'));
+      setError(apiError(err, 'We could not add this company'));
     } finally {
       setSubmitting(false);
     }
@@ -111,15 +111,15 @@ export default function AddAccountModal({
       open={open}
       onClose={onClose}
       size="lg"
-      title="Add an account"
-      description="Search for the company you want to add."
+      title="Add a company"
+      description="Search for the company you want to track. We will research it and write your first report straight away."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={submit} loading={submitting} disabled={!selected && query.trim().length < 2}>
-            Add &amp; generate report
+            Add &amp; write report
           </Button>
         </>
       }
@@ -129,9 +129,9 @@ export default function AddAccountModal({
 
         {/* ---- Company ---- */}
         {selected ? (
-          <div className="flex items-start justify-between gap-4 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
+          <div className="flex animate-scale-in items-start justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3.5">
             <div className="flex min-w-0 gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface shadow-card">
                 <Building2 size={17} className="text-brand-600" />
               </div>
               <div className="min-w-0">
@@ -142,7 +142,7 @@ export default function AddAccountModal({
                   {[
                     selected.website,
                     selected.industry,
-                    selected.source === 'local' ? 'In your library' : 'Public data',
+                    selected.source === 'local' ? 'Already in your list' : 'Found online',
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -160,12 +160,16 @@ export default function AddAccountModal({
             </button>
           </div>
         ) : (
-          <Field label="Company" required hint="Can’t find it? Type the exact name and add it anyway.">
+          <Field
+            label="Which company?"
+            required
+            hint="Can’t find it? Type the exact name and add it anyway."
+          >
             <div className="relative">
               <Search size={16} className="absolute left-3 top-3.5 text-ink-faint" />
               <input
                 className="input pl-9"
-                placeholder="Search companies — e.g. Microsoft"
+                placeholder="Start typing a company name — e.g. Microsoft"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 autoFocus
@@ -176,13 +180,13 @@ export default function AddAccountModal({
             </div>
 
             {results.length > 0 && (
-              <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200">
+              <div className="mt-2 max-h-56 animate-slide-down overflow-y-auto rounded-xl border border-slate-200 shadow-card">
                 {results.map((result, i) => (
                   <button
                     key={`${result.name}-${i}`}
                     type="button"
                     onClick={() => choose(result)}
-                    className="flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-2.5 text-left transition last:border-0 hover:bg-slate-50"
+                    className="flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-2.5 text-left transition last:border-0 hover:bg-brand-50"
                   >
                     <Building2 size={15} className="mt-0.5 shrink-0 text-ink-faint" />
                     <div className="min-w-0 flex-1">

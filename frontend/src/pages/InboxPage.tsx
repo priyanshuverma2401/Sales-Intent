@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, Inbox as InboxIcon, MailOpen } from 'lucide-react';
 import { apiError, inboxAPI } from '../services/api';
-import { Alert, Badge, EmptyState, PageHeader, SkeletonRows, cx } from '../components/ui';
+import { Alert, Badge, EmptyState, PageHeader, SkeletonRows, cx, stagger } from '../components/ui';
 
 export default function InboxPage() {
   const navigate = useNavigate();
@@ -47,11 +47,11 @@ export default function InboxPage() {
         title="Inbox"
         description={
           !showArchived && unread > 0
-            ? `${unread} unread ${unread === 1 ? 'notification' : 'notifications'}`
-            : 'Updates about your accounts and reports.'
+            ? `You have ${unread} unread ${unread === 1 ? 'message' : 'messages'}.`
+            : 'Updates about your companies and reports.'
         }
         actions={
-          <div className="flex gap-1.5">
+          <div className="flex gap-1 rounded-xl bg-slate-100 p-1 ring-1 ring-inset ring-slate-200/70">
             {[
               { label: 'Inbox', archived: false },
               { label: 'Archived', archived: true },
@@ -60,10 +60,10 @@ export default function InboxPage() {
                 key={option.label}
                 onClick={() => setShowArchived(option.archived)}
                 className={cx(
-                  'rounded-lg px-3.5 py-2 text-[13px] font-semibold transition',
+                  'rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-all duration-200 ease-swift',
                   showArchived === option.archived
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-surface text-ink-muted ring-1 ring-slate-200 hover:bg-slate-50'
+                    ? 'bg-surface text-ink shadow-card'
+                    : 'text-ink-muted hover:text-ink'
                 )}
               >
                 {option.label}
@@ -89,17 +89,18 @@ export default function InboxPage() {
           title={showArchived ? 'Nothing archived' : 'Your inbox is empty'}
           description={
             showArchived
-              ? 'Archived notifications will appear here.'
-              : 'Generate a report and we will let you know the moment it is ready.'
+              ? 'Messages you archive will show up here.'
+              : 'Create a report and we will let you know the moment it is ready.'
           }
         />
       ) : (
-        <div className="space-y-3">
-          {messages.map((message) => (
+        <div className="stagger space-y-3">
+          {messages.map((message, i) => (
             <div
               key={message._id}
+              style={stagger(i)}
               className={cx(
-                'card flex items-start gap-4 border-l-[3px] p-5',
+                'card flex items-start gap-4 border-l-[3px] p-5 hover:shadow-raised',
                 message.isRead ? 'border-l-slate-200' : 'border-l-brand-500'
               )}
             >
@@ -128,9 +129,12 @@ export default function InboxPage() {
                         if (!message.isRead) markRead(message._id);
                         navigate(message.actionUrl);
                       }}
-                      className="text-[13px] font-semibold text-brand-600 hover:text-brand-700"
+                      className="group inline-flex items-center gap-1 text-[13px] font-semibold text-brand-600 transition hover:text-brand-700"
                     >
-                      {message.actionText || 'Open'} →
+                      {message.actionText || 'Open'}
+                      <span className="transition-transform duration-200 group-hover:translate-x-0.5">
+                        →
+                      </span>
                     </button>
                   )}
                 </div>

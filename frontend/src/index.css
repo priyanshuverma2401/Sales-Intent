@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -17,14 +17,16 @@
    --------------------------------------------------------------------------- */
 :root {
   --surface: 255 255 255;
+  /* One step above `surface`: hovered rows, sunken wells, table headers. */
+  --surface-2: 250 251 253;
 
-  --ink: 15 23 42;
+  --ink: 12 20 38;
   --ink-soft: 51 65 85;
   --ink-muted: 100 116 139;
   --ink-faint: 148 163 184;
 
-  --slate-50: 248 250 252;
-  --slate-100: 241 245 249;
+  --slate-50: 247 249 252;
+  --slate-100: 240 244 249;
   --slate-200: 226 232 240;
   --slate-300: 203 213 225;
   --slate-400: 148 163 184;
@@ -41,6 +43,12 @@
   --tint-amber: 255 251 235;
   --tint-violet: 245 243 255;
 
+  /* The page itself is not flat white - a whisper of blue behind the cards is
+     what stops a dense dashboard from looking like a printed form. */
+  --page-wash:
+    radial-gradient(900px 480px at 12% -8%, rgb(37 99 235 / 0.055), transparent 62%),
+    radial-gradient(760px 420px at 100% 0%, rgb(99 102 241 / 0.05), transparent 60%);
+
   color-scheme: light;
 }
 
@@ -55,6 +63,7 @@
  */
 .dark {
   --surface: 22 30 46;
+  --surface-2: 28 37 55;
 
   --ink: 241 245 249;
   --ink-soft: 203 213 225;
@@ -81,6 +90,10 @@
   --tint-amber: 66 51 24;
   --tint-violet: 51 42 82;
 
+  --page-wash:
+    radial-gradient(900px 480px at 12% -8%, rgb(59 130 246 / 0.10), transparent 62%),
+    radial-gradient(760px 420px at 100% 0%, rgb(99 102 241 / 0.09), transparent 60%);
+
   color-scheme: dark;
 }
 
@@ -94,13 +107,23 @@
   body {
     margin: 0;
     @apply bg-slate-50 text-ink antialiased;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    letter-spacing: -0.011em;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  /* Headings carry the optical tightening that makes Inter read as a product
+     typeface rather than a default system stack. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.022em;
   }
 
   /* One consistent focus ring across every interactive element */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: none;
-    @apply ring-2 ring-brand-500/40 ring-offset-2 ring-offset-surface;
+    @apply ring-2 ring-brand-500/45 ring-offset-2 ring-offset-surface;
   }
 
   ::-webkit-scrollbar {
@@ -109,49 +132,119 @@
   }
   ::-webkit-scrollbar-thumb {
     @apply rounded-full bg-slate-300;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-slate-400;
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /* Anyone who has asked the OS to stop animations gets a static app. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
   /* --- Surfaces --- */
   .card {
-    @apply rounded-xl border border-slate-200 bg-surface shadow-card;
+    @apply rounded-2xl border border-slate-200/80 bg-surface shadow-card;
+    transition: box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
   }
   .card-pad {
     @apply p-5 sm:p-6;
   }
+  /* Opt-in hover treatment for cards that are themselves a link or button */
+  .card-interactive {
+    @apply cursor-pointer;
+  }
+  .card-interactive:hover {
+    @apply -translate-y-0.5 border-brand-200 shadow-raised;
+  }
+  .card-interactive:active {
+    transform: translateY(0);
+  }
+
+  /* Frosted bar used by the sticky app header */
+  .glass {
+    background-color: rgb(var(--surface) / 0.82);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+  }
 
   /* --- Buttons --- */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold
-           transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply relative inline-flex select-none items-center justify-center gap-2 overflow-hidden
+           rounded-xl text-sm font-semibold
+           disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none;
+    transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease,
+      box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.12s ease;
+  }
+  .btn:not(:disabled):active {
+    transform: translateY(0.5px) scale(0.985);
   }
   .btn-md {
     @apply h-10 px-4;
   }
   .btn-sm {
-    @apply h-8 px-3 text-[13px];
+    @apply h-8 rounded-lg px-3 text-[13px];
   }
   .btn-lg {
     @apply h-11 px-5;
   }
+
   .btn-primary {
-    @apply bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
+    @apply text-white shadow-brand;
+    background-image: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
   }
+  .btn-primary:not(:disabled):hover {
+    @apply shadow-brand-lg;
+    background-image: linear-gradient(135deg, #1d4ed8 0%, #4338ca 100%);
+  }
+  /* A light sweeps across the CTA on hover. Purely decorative, so it is a
+     pseudo-element and never intercepts the click. */
+  .btn-primary::after {
+    content: '';
+    @apply pointer-events-none absolute inset-0 bg-sheen opacity-0;
+    transform: translateX(-100%);
+  }
+  .btn-primary:not(:disabled):hover::after {
+    opacity: 1;
+    transform: translateX(100%);
+    transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  }
+
   .btn-secondary {
-    @apply border border-slate-200 bg-surface text-ink-soft hover:bg-slate-50 hover:text-ink;
+    @apply border border-slate-200 bg-surface text-ink-soft shadow-card;
   }
+  .btn-secondary:not(:disabled):hover {
+    @apply border-slate-300 bg-slate-50 text-ink shadow-raised;
+  }
+
   .btn-ghost {
-    @apply text-ink-muted hover:bg-slate-100 hover:text-ink;
+    @apply text-ink-muted;
   }
+  .btn-ghost:not(:disabled):hover {
+    @apply bg-slate-100 text-ink;
+  }
+
   .btn-danger {
-    @apply border border-red-200 bg-surface text-red-600 hover:bg-red-50;
+    @apply border border-red-200 bg-surface text-red-600;
+  }
+  .btn-danger:not(:disabled):hover {
+    @apply bg-red-50;
   }
 
   /* --- Forms --- */
@@ -162,8 +255,22 @@
     @apply mt-1.5 text-xs leading-relaxed text-ink-muted;
   }
   .input {
-    @apply block w-full rounded-lg border border-slate-300 bg-surface px-3.5 py-2.5 text-sm text-ink
-           placeholder:text-ink-faint focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+    @apply block w-full rounded-xl border border-slate-200 bg-surface px-3.5 py-2.5 text-sm text-ink
+           shadow-inset placeholder:text-ink-faint
+           focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/10;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  }
+  .input:hover:not(:focus):not(:disabled) {
+    @apply border-slate-300;
+  }
+  select.input {
+    @apply cursor-pointer pr-9;
+    /* Native arrows differ per platform; one chevron keeps selects and inputs
+       looking like the same control. */
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
   }
   textarea.input {
     @apply leading-relaxed;
@@ -171,27 +278,33 @@
 
   /* --- Badges --- */
   .badge {
-    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-2xs font-semibold;
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-2xs font-semibold
+           ring-1 ring-inset;
   }
   .badge-neutral {
-    @apply bg-slate-100 text-slate-600;
+    @apply bg-slate-100 text-slate-600 ring-slate-200;
   }
   .badge-brand {
-    @apply bg-brand-50 text-brand-700;
+    @apply bg-brand-50 text-brand-700 ring-brand-200;
   }
   .badge-green {
-    @apply bg-emerald-50 text-emerald-700;
+    @apply bg-emerald-50 text-emerald-700 ring-emerald-200;
   }
   .badge-amber {
-    @apply bg-amber-50 text-amber-700;
+    @apply bg-amber-50 text-amber-700 ring-amber-200;
   }
   .badge-red {
-    @apply bg-red-50 text-red-700;
+    @apply bg-red-50 text-red-700 ring-red-200;
+  }
+
+  /* Small caps label above a heading or beside an icon */
+  .eyebrow {
+    @apply text-2xs font-bold uppercase tracking-[0.13em];
   }
 
   /* --- Report prose --- */
   .report-body {
-    @apply text-[14.5px] leading-[1.65] text-ink-soft;
+    @apply text-[14.5px] leading-[1.7] text-ink-soft;
   }
 }
 
@@ -201,6 +314,42 @@
   }
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Ambient wash behind the whole app shell */
+  .page-wash {
+    background-image: var(--page-wash);
+  }
+
+  /* Brand-coloured display text for hero headings */
+  .text-gradient {
+    background-image: linear-gradient(120deg, #2563eb 0%, #4f46e5 55%, #7c3aed 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Lists mount one item at a time. `--i` is set inline per row; anything past
+     the 12th appears immediately so a long list never stalls. */
+  .stagger > * {
+    animation: fade-in-up 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+
+  /* Moving highlight for skeleton placeholders */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--surface) / 0.65),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
   }
 }
 
@@ -238,6 +387,11 @@
 .dark .text-violet-700 { color: #c4b5fd; }
 .dark .text-cyan-700 { color: #67e8f9; }
 
+/* The gradient headline needs lighter stops to survive a dark background. */
+.dark .text-gradient {
+  background-image: linear-gradient(120deg, #93c5fd 0%, #a5b4fc 55%, #c4b5fd 100%);
+}
+
 /* brand-100 is literal so the sidebar's text stays light in both themes; its
    two uses as a hover background on light surfaces are corrected here. */
 .dark .hover\:bg-brand-100:hover {
@@ -251,17 +405,31 @@
 .dark .border-emerald-200 { border-color: #1f5c4d; }
 .dark .border-amber-200 { border-color: #6b5324; }
 .dark .ring-brand-200 { --tw-ring-color: #2b4a80; }
+.dark .ring-red-200 { --tw-ring-color: #7f3038; }
+.dark .ring-emerald-200 { --tw-ring-color: #1f5c4d; }
+.dark .ring-amber-200 { --tw-ring-color: #6b5324; }
 
 /* Shadows tuned for a white page vanish on a dark one; a light top edge does
    the lifting instead. */
 .dark .shadow-card {
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4), inset 0 1px 0 0 rgb(255 255 255 / 0.03);
 }
-.dark .shadow-raised {
-  box-shadow: 0 4px 10px -2px rgb(0 0 0 / 0.5), inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+.dark .shadow-raised,
+.dark .card-interactive:hover {
+  box-shadow: 0 4px 10px -2px rgb(0 0 0 / 0.5), inset 0 1px 0 0 rgb(255 255 255 / 0.05);
 }
 .dark .shadow-pop {
   box-shadow: 0 20px 30px -8px rgb(0 0 0 / 0.6), inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+}
+.dark .shadow-inset {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.25);
+}
+/* The blue glow under a CTA needs more punch to register on a dark page. */
+.dark .shadow-brand {
+  box-shadow: 0 1px 2px 0 rgb(37 99 235 / 0.4), 0 6px 16px -4px rgb(59 130 246 / 0.5);
+}
+.dark .shadow-brand-lg {
+  box-shadow: 0 2px 4px 0 rgb(37 99 235 / 0.4), 0 14px 28px -6px rgb(59 130 246 / 0.6);
 }
 
 /* Printing the report view should produce something usable even without the
@@ -271,6 +439,7 @@
      rather than printed - otherwise a report exports as light text on nothing. */
   .dark {
     --surface: 255 255 255;
+    --surface-2: 250 251 253;
     --ink: 15 23 42;
     --ink-soft: 51 65 85;
     --ink-muted: 100 116 139;
@@ -286,15 +455,27 @@
     --tint-emerald: 236 253 245;
     --tint-amber: 255 251 235;
     --tint-violet: 245 243 255;
+    --page-wash: none;
     color-scheme: light;
   }
   .dark .text-brand-600 { color: #2563eb; }
   .dark .text-brand-700 { color: #1d4ed8; }
   .dark .text-ink,
   .dark .report-body { color: inherit; }
+  .dark .text-gradient {
+    background-image: none;
+    color: #1d4ed8;
+  }
 
   body {
     background: #fff;
+  }
+  /* Ink and paper only: washes and animations have no place in an export. */
+  .page-wash {
+    background-image: none;
+  }
+  .stagger > * {
+    animation: none;
   }
   .no-print {
     display: none !important;

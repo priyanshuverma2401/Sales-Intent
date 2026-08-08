@@ -20,15 +20,15 @@ export default function SettingsPage() {
   // The API tab is admin-only: a key reads every report the company has ever
   // generated, so it is not something a member should see or create.
   const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
-    { id: 'profile', label: 'Profile', icon: UserIcon },
-    { id: 'company', label: 'Company profile', icon: Building2 },
-    { id: 'users', label: 'Users', icon: Users },
+    { id: 'profile', label: 'You', icon: UserIcon },
+    { id: 'company', label: 'Your business', icon: Building2 },
+    { id: 'users', label: 'Your team', icon: Users },
     // Admin-only: a CRM connection exposes the whole tenant's pipeline, and an
     // API key reads every report the company has ever generated
     ...(isAdmin
       ? [
-          { id: 'integrations' as TabId, label: 'Integrations', icon: Plug },
-          { id: 'api' as TabId, label: 'API', icon: Code2 },
+          { id: 'integrations' as TabId, label: 'Connected apps', icon: Plug },
+          { id: 'api' as TabId, label: 'Developers', icon: Code2 },
         ]
       : []),
   ];
@@ -37,8 +37,8 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         eyebrow="Settings"
-        title="Workspace settings"
-        description="Your account, and the company profile every report is built from."
+        title="Settings"
+        description="Your account, and the business details every report is built from."
       />
 
       {message && (
@@ -49,16 +49,16 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="mb-6 flex gap-1 border-b border-slate-200">
+      <div className="mb-6 flex flex-wrap gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-surface p-1 shadow-card">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={cx(
-              'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition',
+              'flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-all duration-200 ease-swift',
               tab === id
-                ? 'border-brand-600 text-brand-700'
-                : 'border-transparent text-ink-muted hover:text-ink'
+                ? 'bg-brand-gradient text-white shadow-brand'
+                : 'text-ink-muted hover:bg-slate-50 hover:text-ink'
             )}
           >
             <Icon size={15} />
@@ -66,6 +66,9 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* Re-keyed on the tab so switching panels replays the entrance */}
+      <div key={tab} className="animate-fade-in-up">
 
       {tab === 'profile' && (
         <ProfilePanel
@@ -84,7 +87,7 @@ export default function SettingsPage() {
           canEdit={isAdmin}
           onSaved={(updated) => {
             setOrganization(updated);
-            setMessage({ tone: 'success', text: 'Company profile saved.' });
+            setMessage({ tone: 'success', text: 'Your business details are saved.' });
           }}
           onError={(text) => setMessage({ tone: 'error', text })}
         />
@@ -99,6 +102,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'api' && isAdmin && <ApiKeysPanel canEdit={isAdmin} onMessage={setMessage} />}
+      </div>
     </div>
   );
 }

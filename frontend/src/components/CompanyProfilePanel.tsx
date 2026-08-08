@@ -129,7 +129,7 @@ export default function CompanyProfilePanel({
       setSaved(toForm(res.data));
       onSaved(res.data);
     } catch (err) {
-      onError(apiError(err, 'Could not save the company profile'));
+      onError(apiError(err, 'We could not save your business details'));
     } finally {
       setSaving(false);
     }
@@ -141,14 +141,14 @@ export default function CompanyProfilePanel({
     <div className="space-y-5 pb-2">
       {!canEdit && (
         <Alert tone="info">
-          Only owners and admins can edit the company profile. You can still see what your reports
-          and signals are built from.
+          Only owners and admins can change these details. You can still see what your reports and
+          buying signals are built from.
         </Alert>
       )}
 
       <TitleRulesCard
-        title="Relevant Contact Titles"
-        description="Add relevant contact titles to track. This focuses on new hires, departures, role changes, and job openings at your target accounts."
+        title="People worth watching"
+        description="Which job titles matter to you? We will flag new hires, departures, role changes and job openings for these roles at the companies you track."
         items={form.relevantContactTitles}
         onChange={(relevantContactTitles) => set({ relevantContactTitles })}
         canEdit={canEdit}
@@ -156,8 +156,8 @@ export default function CompanyProfilePanel({
       />
 
       <TitleRulesCard
-        title="Relevant Hiring Titles"
-        description="Tracks current hiring positions. Only add titles not already in Relevant Contact Titles list as those are tracked automatically."
+        title="Roles they are hiring for"
+        description="Job openings we should watch for. You only need to add titles that are not already in “People worth watching” — those are covered automatically."
         items={form.relevantHiringTitles}
         onChange={(relevantHiringTitles) => set({ relevantHiringTitles })}
         canEdit={canEdit}
@@ -177,10 +177,14 @@ export default function CompanyProfilePanel({
       />
 
       <Card className="card-pad">
-        <h2 className="mb-5 text-lg font-bold tracking-tight text-ink">Company Information</h2>
+        <h2 className="mb-1 text-lg font-bold tracking-tight text-ink">Tell us about your company</h2>
+        <p className="mb-5 text-[13px] leading-relaxed text-ink-muted">
+          The more you share here, the more your reports sound like you. Nothing is compulsory —
+          fill in what you can.
+        </p>
 
         <div className="space-y-6">
-          <Field label="Company website URL">
+          <Field label="Your website">
             <input
               className="input"
               placeholder="https://example.com"
@@ -191,50 +195,50 @@ export default function CompanyProfilePanel({
           </Field>
 
           <LongField
-            label="Company Overview"
-            question="What's the name of your company and brief description of what you do?"
+            label="What your company does"
+            question="What is your company called, and what do you do in a sentence or two?"
             value={form.description}
             onChange={(description) => set({ description })}
             disabled={!canEdit}
           />
           <LongField
-            label="Product Features and Capabilities"
-            question="What products, features and capabilities do you offer?"
+            label="What you offer"
+            question="What products and services do you sell?"
             value={form.productFeatures}
             onChange={(productFeatures) => set({ productFeatures })}
             disabled={!canEdit}
           />
           <LongField
-            label="Problems, Pains and Challenges"
-            question="What pains and challenges does your solution/product/service address?"
+            label="Problems you solve"
+            question="What headaches do your customers come to you with?"
             value={form.problemsSolved}
             onChange={(problemsSolved) => set({ problemsSolved })}
             disabled={!canEdit}
           />
           <LongField
-            label="Outcomes and Benefits Delivered"
-            question="What benefits and value does your solution/product/service offer?"
+            label="Results you deliver"
+            question="What do your customers get out of working with you?"
             value={form.outcomesDelivered}
             onChange={(outcomesDelivered) => set({ outcomesDelivered })}
             disabled={!canEdit}
           />
           <LongField
-            label="Competitors and Differentiation"
-            question="Which competitors do you need to differentiate against, and what's your differentiation?"
+            label="Who you compete with"
+            question="Who else do your buyers consider, and why should they pick you?"
             value={form.competitorsDifferentiation}
             onChange={(competitorsDifferentiation) => set({ competitorsDifferentiation })}
             disabled={!canEdit}
           />
           <LongField
-            label="Case Studies and Customer Testimonials"
-            question="What are your customers saying and what supporting case studies and testimonials can you provide?"
+            label="Success stories"
+            question="What are your customers saying, and which case studies can you point to?"
             value={form.caseStudies}
             onChange={(caseStudies) => set({ caseStudies })}
             disabled={!canEdit}
           />
           <LongField
-            label="Industry Terminology and Language"
-            question="What industry terminology and language do you want to provide to tailor the outputs?"
+            label="Words your industry uses"
+            question="Any terms or phrases we should use so reports sound like your team?"
             value={form.industryTerminology}
             onChange={(industryTerminology) => set({ industryTerminology })}
             disabled={!canEdit}
@@ -243,13 +247,14 @@ export default function CompanyProfilePanel({
       </Card>
 
       <Card className="card-pad">
-        <h2 className="mb-1 text-base font-bold text-ink">What your company sells</h2>
+        <h2 className="mb-1 text-base font-bold text-ink">The short version</h2>
         <p className="mb-5 text-[13px] leading-relaxed text-ink-muted">
-          The short version, used for scoring. Reports only argue for capabilities listed here.
+          This is what we score every company against. Reports only make the case for what you list
+          here, so keep it to what you genuinely sell.
         </p>
 
         <div className="space-y-5">
-          <Field label="Capabilities" required>
+          <Field label="What you sell" required hint="A few words each — add as many as you like.">
             <TagInput
               value={form.capabilities}
               onChange={(capabilities) => set({ capabilities })}
@@ -259,8 +264,8 @@ export default function CompanyProfilePanel({
           </Field>
 
           <Field
-            label="Capability detail"
-            hint="Named platforms, accelerators or methods your reps reference on calls."
+            label="Anything else worth naming"
+            hint="Platforms, tools or methods your team mentions on calls."
           >
             <textarea
               className="input"
@@ -271,7 +276,10 @@ export default function CompanyProfilePanel({
             />
           </Field>
 
-          <Field label="Value propositions" hint="The outcomes you sell, not the services.">
+          <Field
+            label="Promises you make"
+            hint="The result a customer gets, not the service itself."
+          >
             <TagInput
               value={form.valuePropositions}
               onChange={(valuePropositions) => set({ valuePropositions })}
@@ -279,7 +287,10 @@ export default function CompanyProfilePanel({
             />
           </Field>
 
-          <Field label="Proof points" hint="Results you can cite. They surface in the value story.">
+          <Field
+            label="Proof you can point to"
+            hint="Real numbers you can quote. We work these into the pitch section of every report."
+          >
             <TagInput
               value={form.proofPoints}
               onChange={(proofPoints) => set({ proofPoints })}
@@ -290,10 +301,13 @@ export default function CompanyProfilePanel({
       </Card>
 
       <Card className="card-pad">
-        <h2 className="mb-5 text-base font-bold text-ink">Company details</h2>
+        <h2 className="mb-1 text-base font-bold text-ink">Your details and your buyers</h2>
+        <p className="mb-5 text-[13px] leading-relaxed text-ink-muted">
+          Where you are based, and the kind of customer you are looking for.
+        </p>
         <div className="space-y-5">
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Company name">
+            <Field label="Your company name">
               <input
                 className="input"
                 disabled={!canEdit}
@@ -309,7 +323,7 @@ export default function CompanyProfilePanel({
                 onChange={(e) => set({ industry: e.target.value })}
               />
             </Field>
-            <Field label="Headquarters">
+            <Field label="Where you are based">
               <input
                 className="input"
                 disabled={!canEdit}
@@ -341,24 +355,23 @@ export default function CompanyProfilePanel({
       </Card>
 
       <Card className="card-pad">
-        <h2 className="mb-4 text-base font-bold text-ink">Subscription</h2>
+        <h2 className="mb-4 text-base font-bold text-ink">Your plan</h2>
         <dl className="grid gap-4 sm:grid-cols-3">
           <div>
-            <dt className="text-2xs font-bold uppercase tracking-wider text-ink-faint">Plan</dt>
+            <dt className="eyebrow text-ink-faint">Plan</dt>
             <dd className="mt-1 text-sm font-semibold capitalize text-ink">
               {organization.subscription?.plan || 'trial'}
             </dd>
           </div>
           <div>
-            <dt className="text-2xs font-bold uppercase tracking-wider text-ink-faint">Seats</dt>
+            <dt className="eyebrow text-ink-faint">People</dt>
             <dd className="mt-1 text-sm font-semibold text-ink">
-              {organization.seatsUsed ?? '—'} of {organization.subscription?.seats ?? '—'} used
+              {organization.seatsUsed ?? '—'} of {organization.subscription?.seats ?? '—'} places
+              taken
             </dd>
           </div>
           <div>
-            <dt className="text-2xs font-bold uppercase tracking-wider text-ink-faint">
-              Sign-up domains
-            </dt>
+            <dt className="eyebrow text-ink-faint">Email domains</dt>
             <dd className="mt-1 flex flex-wrap gap-1.5">
               {(organization.domains || []).map((d: string) => (
                 <Badge key={d} tone="brand">
@@ -368,19 +381,25 @@ export default function CompanyProfilePanel({
             </dd>
           </div>
         </dl>
-        <p className="mt-4 text-[13px] text-ink-muted">
-          Anyone with one of these email domains can create their own account against your
-          subscription.
+        <p className="mt-4 text-[13px] leading-relaxed text-ink-muted">
+          Anyone with an email address at one of these domains can set up their own account on your
+          plan.
         </p>
       </Card>
 
       {canEdit && (
-        <div className="sticky bottom-0 z-10 -mx-1 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/95 px-1 py-4 backdrop-blur">
+        <div className="glass sticky bottom-0 z-10 -mx-1 flex items-center justify-end gap-2 rounded-t-xl border-t border-slate-200 px-3 py-4">
+          {dirty && (
+            <span className="mr-auto flex items-center gap-2 text-[13px] font-medium text-amber-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+              You have unsaved changes
+            </span>
+          )}
           <Button variant="secondary" disabled={!dirty || saving} onClick={() => setForm(saved)}>
-            Cancel
+            Discard
           </Button>
           <Button icon={Save} loading={saving} disabled={!dirty} onClick={save}>
-            Save
+            Save changes
           </Button>
         </div>
       )}
@@ -458,7 +477,8 @@ function ListCard({
             type="button"
             onClick={onAdd}
             aria-label={`Add to ${title}`}
-            className="btn btn-ghost h-8 w-8 shrink-0 rounded-lg p-0"
+            title={`Add to ${title}`}
+            className="btn btn-secondary h-9 w-9 shrink-0 rounded-xl p-0"
           >
             <Plus size={18} />
           </button>
@@ -484,7 +504,7 @@ function RowActions({
         type="button"
         onClick={onEdit}
         aria-label={`Edit ${label}`}
-        className="rounded-lg p-1.5 text-ink-faint transition hover:bg-slate-100 hover:text-ink"
+        className="rounded-lg p-1.5 text-ink-faint transition hover:bg-slate-100 hover:text-ink active:scale-95"
       >
         <Pencil size={16} />
       </button>
@@ -545,8 +565,8 @@ function TitleRulesCard({
   };
 
   const editor = (
-    <div className="space-y-4 bg-slate-50 px-6 py-5">
-      <Field label="Title" required hint="The seniority or role bucket to watch for.">
+    <div className="animate-slide-down space-y-4 bg-surface-2 px-6 py-5">
+      <Field label="Job title" required hint="The kind of role you want to hear about.">
         <input
           className="input"
           list={listId}
@@ -562,7 +582,10 @@ function TitleRulesCard({
           }}
         />
       </Field>
-      <Field label="Keywords" hint="A title only counts when it also matches one of these.">
+      <Field
+        label="Narrow it down (optional)"
+        hint="We will only flag this title when it also mentions one of these words."
+      >
         <TagInput
           value={draft.keywords}
           onChange={(keywords) => setDraft({ ...draft, keywords })}
@@ -584,7 +607,7 @@ function TitleRulesCard({
   return (
     <ListCard title={title} description={description} onAdd={startAdd} canEdit={canEdit}>
       {items.length === 0 && editing !== 'new' && (
-        <EmptyRow>No titles tracked yet. Use + to add the first one.</EmptyRow>
+        <EmptyRow>Nothing here yet — use the + button to add your first job title.</EmptyRow>
       )}
 
       {items.map((rule, index) =>
@@ -597,7 +620,7 @@ function TitleRulesCard({
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
               {rule.keywords.length > 0 && (
                 <>
-                  <span className="text-[13px] text-ink-muted">Keywords:</span>
+                  <span className="text-[13px] text-ink-muted">Only when it mentions:</span>
                   {rule.keywords.map((keyword) => (
                     <span
                       key={keyword}
@@ -665,8 +688,8 @@ function TopicsCard({
   );
 
   const editor = (
-    <div className="space-y-4 bg-slate-50 px-6 py-5">
-      <Field label="Topic" required>
+    <div className="animate-slide-down space-y-4 bg-surface-2 px-6 py-5">
+      <Field label="Topic" required hint="A theme, a competitor name, or any phrase worth watching.">
         <input
           className="input"
           autoFocus
@@ -689,7 +712,8 @@ function TopicsCard({
           checked={draft.priority === 'high'}
           onChange={(e) => setDraft({ ...draft, priority: e.target.checked ? 'high' : 'normal' })}
         />
-        High priority — lift matching signals to the top of the feed
+        Make this a top priority — we will lead every report with it and push matching news to the
+        top
       </label>
 
       <div className="flex gap-2">
@@ -723,13 +747,13 @@ function TopicsCard({
 
   return (
     <ListCard
-      title="Relevant Topics"
-      description="Add topics to monitor across public web sources and surface in the Signal Feed. You can include generic topics and industry-specific topics such as competitor names, acronyms, or any other specialized relevant keywords."
+      title="Topics you care about"
+      description="What should we watch for in the news? Add broad themes or specific things like competitor names and industry jargon. Mark the ones that matter most as a top priority and every report will lead with them."
       onAdd={startAdd}
       canEdit={canEdit}
     >
       {items.length === 0 && editing !== 'new' && (
-        <EmptyRow>No topics monitored yet. Use + to add the first one.</EmptyRow>
+        <EmptyRow>Nothing here yet — use the + button to add your first topic.</EmptyRow>
       )}
 
       {items.map((topic, index) =>
@@ -739,10 +763,10 @@ function TopicsCard({
           <div key={`${topic.name}-${index}`} className="flex items-center gap-3 px-6 py-3.5">
             <span
               className={cx(
-                'inline-flex items-center gap-1 rounded px-2 py-1 text-[13px] font-semibold',
+                'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-semibold ring-1 ring-inset',
                 topic.priority === 'high'
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : 'bg-slate-100 text-ink-muted'
+                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                  : 'bg-slate-100 text-ink-muted ring-slate-200'
               )}
             >
               {topic.priority === 'high' && <ChevronsUp size={14} className="text-emerald-600" />}
@@ -804,11 +828,10 @@ function TechnologiesCard({
 
   return (
     <Card className="card-pad">
-      <h2 className="text-lg font-bold tracking-tight text-ink">Relevant Technologies</h2>
+      <h2 className="text-lg font-bold tracking-tight text-ink">Tools and technology you care about</h2>
       <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-muted">
-        Add technologies to monitor across public web sources and surface in account details. You
-        can include generic technologies and industry-specific technologies such as competitor
-        names, acronyms, or any other specialized relevant technologies.
+        Which tools do you want to know about when a company uses them? Pick from the list or type
+        your own — product names, competitors and acronyms all work.
       </p>
 
       {value.length > 0 && (
@@ -816,7 +839,7 @@ function TechnologiesCard({
           {value.map((tech) => (
             <span
               key={tech}
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-50 py-1 pl-2.5 pr-1.5 text-[13px] font-medium text-brand-700"
+              className="inline-flex animate-scale-in items-center gap-1.5 rounded-lg bg-brand-50 py-1 pl-2.5 pr-1.5 text-[13px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200"
             >
               {tech}
               {canEdit && (
@@ -836,7 +859,7 @@ function TechnologiesCard({
 
       {canEdit && (
         <>
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-300 px-3 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20">
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 px-3 shadow-inset transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 hover:border-slate-300">
             <Search size={16} className="shrink-0 text-ink-faint" />
             <input
               value={query}
@@ -871,8 +894,8 @@ function TechnologiesCard({
                 className="w-full rounded-lg px-3 py-3 text-left text-[13px] text-ink-muted transition hover:bg-slate-50 disabled:opacity-60"
               >
                 {query.trim()
-                  ? `Press Enter to add “${query.trim()}” as a custom technology.`
-                  : 'Everything in the catalogue is already tracked.'}
+                  ? `Press Enter to add “${query.trim()}” yourself.`
+                  : 'You are already watching everything on our list.'}
               </button>
             ) : (
               <ul className="divide-y divide-slate-100">

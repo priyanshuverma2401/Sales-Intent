@@ -168,7 +168,7 @@ export default function ApiKeysPanel({
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left">
-              <thead className="border-y border-slate-100 bg-slate-50 text-[13px] font-semibold text-ink-muted">
+              <thead className="border-y border-slate-100 bg-surface-2 text-[13px] font-semibold text-ink-muted">
                 <tr>
                   <th className="px-6 py-3">Name</th>
                   <th className="px-6 py-3">Key</th>
@@ -337,7 +337,7 @@ function CreateKeyModal({
             </span>
           </Alert>
 
-          <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-50 p-3">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-surface-2 p-3">
             <code className="min-w-0 flex-1 break-all text-[12.5px] text-ink">{secret}</code>
             <CopyButton value={secret} label="Copy key" />
           </div>

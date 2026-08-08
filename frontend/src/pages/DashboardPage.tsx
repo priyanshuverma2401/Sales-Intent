@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
+  ArrowUpRight,
   Bell,
   Building2,
   FileText,
@@ -23,7 +24,16 @@ import {
   ScoreRing,
   SkeletonRows,
   cx,
+  stagger,
 } from '../components/ui';
+
+/** Greeting that matches the clock — small touch, but it makes the app feel awake. */
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -76,76 +86,92 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         eyebrow={organization?.name}
-        title={`Good to see you, ${user?.firstName || 'there'}`}
+        title={`${greeting()}, ${user?.firstName || 'there'}`}
         description={
           lens.length
-            ? `Every account below is read for where they need ${lens.join(' and ')}.`
-            : 'Add relevant topics to the company profile so we can tell you which accounts need what you sell.'
+            ? `We are reading every company below for where they need ${lens.join(' and ')}.`
+            : 'Tell us the topics you care about and we will show you which companies need what you sell.'
         }
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
-            Add account
+            Add a company
           </Button>
         }
       />
 
       {/* Company profile nudge. Only owners and admins can act on it. */}
       {incomplete && (
-        <Card className="mb-6 border-brand-200 bg-gradient-to-br from-brand-50 to-surface p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex gap-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-600">
-                <Target size={19} className="text-white" />
-              </span>
-              <div>
-                <h2 className="text-base font-bold text-ink">Complete your company profile</h2>
-                <p className="mt-1 max-w-xl text-sm leading-relaxed text-ink-soft">
-                  What your company sells and the topics it monitors decide what every report
-                  focuses on — and topics marked high priority lead the analysis.
-                  {!isAdmin && ' Only an owner or admin can fill this in.'}
-                </p>
+        <Card className="mb-6 animate-fade-in-up overflow-hidden border-brand-200 p-0">
+          <div className="relative">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 opacity-90"
+              style={{
+                backgroundImage:
+                  'linear-gradient(120deg, rgb(37 99 235 / 0.10) 0%, rgb(99 102 241 / 0.06) 45%, transparent 75%)',
+              }}
+            />
+            <div className="relative flex flex-wrap items-start justify-between gap-4 p-6">
+              <div className="flex gap-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-gradient shadow-brand">
+                  <Target size={20} className="text-white" />
+                </span>
+                <div>
+                  <h2 className="text-[17px] font-bold tracking-tight text-ink">
+                    Tell us about your business
+                  </h2>
+                  <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-ink-soft">
+                    What your company sells and the topics you care about decide what every report
+                    focuses on — the topics you mark as top priority lead the analysis.
+                    {!isAdmin && ' Only an owner or admin can fill this in.'}
+                  </p>
+                </div>
               </div>
+              {isAdmin && (
+                <Button onClick={() => navigate('/settings')}>
+                  Finish setup <ArrowRight size={15} />
+                </Button>
+              )}
             </div>
-            {isAdmin && (
-              <Button onClick={() => navigate('/settings')}>
-                Complete setup <ArrowRight size={15} />
-              </Button>
-            )}
           </div>
         </Card>
       )}
 
       {/* KPIs */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="stagger mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
-          label="Accounts tracked"
+          label="Companies tracked"
           value={accounts.length}
           icon={Building2}
           tone="brand"
           to="/accounts"
+          index={0}
         />
         <Stat
-          label="Priority fits"
+          label="Strong matches"
           value={priorityCount}
-          hint="Score 70+"
+          hint="Scoring 70 or higher"
           icon={TrendingUp}
           tone="green"
           to="/accounts"
+          index={1}
         />
         <Stat
-          label="Reports"
+          label="Reports created"
           value={reports.length}
-          hint={pendingCount ? `${pendingCount} generating` : undefined}
+          hint={pendingCount ? `${pendingCount} being written now` : undefined}
           icon={FileText}
           tone="purple"
           to="/reports"
+          index={2}
         />
         <Stat
-          label="Signals this week"
+          label="News this week"
           value={signals.length}
           icon={Bell}
           tone="amber"
           to="/signals"
+          index={3}
         />
       </div>
 
@@ -154,14 +180,20 @@ export default function DashboardPage() {
         <div>
           <div className="mb-4 flex items-end justify-between">
             <div>
-              <h2 className="text-lg font-bold tracking-tight text-ink">Best-fit accounts</h2>
-              <p className="text-[13px] text-ink-muted">Ranked by Salesmotion score.</p>
+              <h2 className="text-lg font-bold tracking-tight text-ink">Your best opportunities</h2>
+              <p className="mt-0.5 text-[13px] text-ink-muted">
+                Ranked by how well they fit what you sell.
+              </p>
             </div>
             <Link
               to="/accounts"
-              className="text-[13px] font-semibold text-brand-600 hover:text-brand-700"
+              className="group inline-flex items-center gap-1 text-[13px] font-semibold text-brand-600 transition hover:text-brand-700"
             >
-              View all
+              See all
+              <ArrowRight
+                size={13}
+                className="transition-transform duration-200 group-hover:translate-x-0.5"
+              />
             </Link>
           </div>
 
@@ -170,10 +202,10 @@ export default function DashboardPage() {
           ) : ranked.length === 0 ? (
             <EmptyState
               icon={Building2}
-              title={accounts.length ? 'No scored accounts yet' : 'No accounts yet'}
+              title={accounts.length ? 'No scores yet' : 'No companies yet'}
               description={
                 accounts.length
-                  ? 'Generate a report for one of your accounts to see it scored here.'
+                  ? 'Create a report for one of your companies to see how well it fits what you sell.'
                   : 'Add a company and we will research it against what you sell.'
               }
               action={
@@ -181,26 +213,29 @@ export default function DashboardPage() {
                   icon={Plus}
                   onClick={() => (accounts.length ? navigate('/accounts') : setModalOpen(true))}
                 >
-                  {accounts.length ? 'Go to accounts' : 'Add your first account'}
+                  {accounts.length ? 'Go to companies' : 'Add your first company'}
                 </Button>
               }
             />
           ) : (
-            <div className="space-y-3">
-              {ranked.map((account) => (
+            <div className="stagger space-y-3">
+              {ranked.map((account, i) => (
                 <button
                   key={account._id}
+                  style={stagger(i)}
                   onClick={() =>
                     account.latestReport?._id
                       ? navigate(`/reports/${account.latestReport._id}`)
                       : navigate('/accounts')
                   }
-                  className="card flex w-full items-center gap-4 p-4 text-left transition hover:-translate-y-0.5 hover:shadow-raised"
+                  className="card card-interactive group flex w-full items-center gap-4 p-4 text-left"
                 >
                   <ScoreRing value={account.latestReport.score} size={54} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-bold text-ink">{account.name}</span>
+                      <span className="truncate font-bold tracking-tight text-ink">
+                        {account.name}
+                      </span>
                       {account.latestReport.band && (
                         <Badge
                           tone={
@@ -219,7 +254,10 @@ export default function DashboardPage() {
                       {[account.industry, account.country].filter(Boolean).join(' · ')}
                     </p>
                   </div>
-                  <ArrowRight size={16} className="shrink-0 text-ink-faint" />
+                  <ArrowRight
+                    size={16}
+                    className="shrink-0 text-ink-faint transition-all duration-200 ease-swift group-hover:translate-x-0.5 group-hover:text-brand-500"
+                  />
                 </button>
               ))}
             </div>
@@ -230,36 +268,36 @@ export default function DashboardPage() {
         <div className="space-y-6">
           {/* The company profile lens every report is written through */}
           <Card className="card-pad">
-            <h3 className="mb-3 flex items-center gap-1.5 text-2xs font-bold uppercase tracking-[0.12em] text-brand-600">
-              <Sparkles size={13} /> Report focus
+            <h3 className="eyebrow mb-4 flex items-center gap-1.5 text-brand-600">
+              <Sparkles size={13} /> What we look for
             </h3>
 
-            <dl className="space-y-3 text-[13px]">
+            <dl className="space-y-3.5 text-[13px]">
               <div>
-                <dt className="font-semibold text-ink-faint">High-priority topics</dt>
-                <dd className="mt-1 flex flex-wrap gap-1.5">
+                <dt className="font-semibold text-ink-faint">Top priorities</dt>
+                <dd className="mt-1.5 flex flex-wrap gap-1.5">
                   {priorityTopics.length ? (
                     priorityTopics.map((topic) => (
                       <span
                         key={topic}
-                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700"
+                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"
                       >
                         {topic}
                       </span>
                     ))
                   ) : (
-                    <span className="text-ink-faint">None marked</span>
+                    <span className="text-ink-faint">None chosen</span>
                   )}
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-ink-faint">Other topics</dt>
-                <dd className="mt-1 flex flex-wrap gap-1.5">
+                <dt className="font-semibold text-ink-faint">Also watching</dt>
+                <dd className="mt-1.5 flex flex-wrap gap-1.5">
                   {otherTopics.length ? (
                     otherTopics.map((topic) => (
                       <span
                         key={topic}
-                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200"
                       >
                         {topic}
                       </span>
@@ -270,41 +308,46 @@ export default function DashboardPage() {
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-ink-faint">Capabilities</dt>
-                <dd className="mt-0.5 text-ink-soft">
-                  {organization?.capabilities?.join(', ') || 'Not set'}
+                <dt className="font-semibold text-ink-faint">What you sell</dt>
+                <dd className="mt-1 leading-relaxed text-ink-soft">
+                  {organization?.capabilities?.join(', ') || 'Not set yet'}
                 </dd>
               </div>
             </dl>
 
             <Link
               to="/settings"
-              className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold text-brand-600 hover:text-brand-700"
+              className="group mt-5 inline-flex items-center gap-1.5 text-[13px] font-semibold text-brand-600 transition hover:text-brand-700"
             >
-              {isAdmin ? 'Edit company profile' : 'View company profile'} <ArrowRight size={13} />
+              {isAdmin ? 'Edit your business profile' : 'View your business profile'}
+              <ArrowRight
+                size={13}
+                className="transition-transform duration-200 group-hover:translate-x-0.5"
+              />
             </Link>
           </Card>
 
           {/* Recent reports */}
           <Card className="card-pad">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-2xs font-bold uppercase tracking-[0.12em] text-ink-faint">
-                Recent reports
-              </h3>
-              <Link to="/reports" className="text-2xs font-semibold text-brand-600 hover:underline">
-                All
+              <h3 className="eyebrow text-ink-faint">Latest reports</h3>
+              <Link
+                to="/reports"
+                className="text-2xs font-semibold text-brand-600 transition hover:underline"
+              >
+                See all
               </Link>
             </div>
 
             {reports.length === 0 ? (
-              <p className="text-[13px] text-ink-muted">Nothing generated yet.</p>
+              <p className="text-[13px] text-ink-muted">Nothing created yet.</p>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="-mx-2 divide-y divide-slate-100">
                 {reports.slice(0, 5).map((report) => (
                   <li key={report._id}>
                     <button
                       onClick={() => navigate(`/reports/${report._id}`)}
-                      className="flex w-full items-center gap-2.5 py-2.5 text-left"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left transition hover:bg-slate-50"
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13.5px] font-semibold text-ink">
@@ -317,11 +360,11 @@ export default function DashboardPage() {
                       {report.status === 'pending' ? (
                         <Loader2 size={14} className="animate-spin text-brand-500" />
                       ) : report.status === 'failed' ? (
-                        <Badge tone="red">failed</Badge>
+                        <Badge tone="red">not finished</Badge>
                       ) : (
                         <span
                           className={cx(
-                            'text-[13px] font-bold',
+                            'text-[13px] font-bold tabular-nums',
                             (report.score?.value || 0) >= 70 ? 'text-emerald-600' : 'text-ink-muted'
                           )}
                         >
@@ -338,20 +381,21 @@ export default function DashboardPage() {
           {/* Latest signals */}
           <Card className="card-pad">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-2xs font-bold uppercase tracking-[0.12em] text-ink-faint">
-                Latest signals
-              </h3>
-              <Link to="/signals" className="text-2xs font-semibold text-brand-600 hover:underline">
-                All
+              <h3 className="eyebrow text-ink-faint">Latest news</h3>
+              <Link
+                to="/signals"
+                className="text-2xs font-semibold text-brand-600 transition hover:underline"
+              >
+                See all
               </Link>
             </div>
 
             {signals.length === 0 ? (
-              <p className="text-[13px] text-ink-muted">
-                No signals in the last 7 days. Refresh an account to pull fresh news.
+              <p className="text-[13px] leading-relaxed text-ink-muted">
+                No news in the last 7 days. Use “Check for news” on a company to look again.
               </p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="space-y-3.5">
                 {signals.slice(0, 4).map((signal) => (
                   <li key={signal._id} className="flex gap-2.5">
                     <span
@@ -399,6 +443,7 @@ function Stat({
   icon: Icon,
   tone,
   to,
+  index,
 }: {
   label: string;
   value: number;
@@ -406,24 +451,42 @@ function Stat({
   icon: React.ElementType;
   tone: 'brand' | 'green' | 'purple' | 'amber';
   to: string;
+  index: number;
 }) {
   const tones = {
-    brand: 'bg-brand-50 text-brand-600',
-    green: 'bg-emerald-50 text-emerald-600',
-    purple: 'bg-violet-50 text-violet-600',
-    amber: 'bg-amber-50 text-amber-600',
+    brand: 'bg-brand-50 text-brand-600 ring-brand-200',
+    green: 'bg-emerald-50 text-emerald-600 ring-emerald-200',
+    purple: 'bg-violet-50 text-violet-600 ring-violet-200',
+    amber: 'bg-amber-50 text-amber-600 ring-amber-200',
   };
 
   return (
-    <Link to={to} className="card flex items-center gap-4 p-5 transition hover:shadow-raised">
-      <span className={cx('flex h-11 w-11 items-center justify-center rounded-xl', tones[tone])}>
-        <Icon size={20} />
+    <Link
+      to={to}
+      style={stagger(index)}
+      className="card card-interactive group relative flex items-center gap-4 overflow-hidden p-5"
+    >
+      <span
+        className={cx(
+          'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset transition-transform duration-300 ease-swift group-hover:scale-110',
+          tones[tone]
+        )}
+      >
+        <Icon size={21} />
       </span>
+
       <div className="min-w-0">
-        <p className="text-2xs font-bold uppercase tracking-wider text-ink-faint">{label}</p>
-        <p className="text-2xl font-extrabold leading-tight text-ink">{value}</p>
-        {hint && <p className="text-2xs text-ink-muted">{hint}</p>}
+        <p className="eyebrow text-ink-faint">{label}</p>
+        <p className="mt-0.5 text-[28px] font-extrabold leading-none tracking-tighter text-ink tabular-nums">
+          {value}
+        </p>
+        {hint && <p className="mt-1 text-2xs text-ink-muted">{hint}</p>}
       </div>
+
+      <ArrowUpRight
+        size={15}
+        className="absolute right-4 top-4 text-ink-faint opacity-0 transition-all duration-200 ease-swift group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100"
+      />
     </Link>
   );
 }

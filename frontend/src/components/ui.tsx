@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Check, Loader2, X } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { AlertCircle, Check, Info, Loader2, X } from 'lucide-react';
 
 // Shared primitives. Everything visual in the app is built from these so a
 // spacing or colour change happens in exactly one place.
@@ -8,33 +8,38 @@ export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ');
 }
 
+/**
+ * Per-item mount delay for a `.stagger` list. Capped so a hundred-row list does
+ * not take five seconds to finish appearing.
+ */
+export function stagger(index: number): React.CSSProperties {
+  return { '--i': Math.min(index, 12) } as React.CSSProperties;
+}
+
 // --- Logo -----------------------------------------------------------------
 
 export function Logo({ compact = false, light = false }: { compact?: boolean; light?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="group inline-flex items-center gap-2.5">
+      <span className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center">
+        {/* Rounded-square mark. The two dots are the "motion": one settled, one
+            still travelling, and they close the gap on hover. */}
+        <span
+          className="absolute inset-0 rounded-[10px] bg-brand-gradient shadow-brand transition-transform duration-500 ease-swift group-hover:scale-105"
+          aria-hidden
+        />
+        <span className="relative inline-block h-3.5 w-6">
+          <span className="absolute left-0 top-0 h-3.5 w-3.5 rounded-full bg-white/95" />
+          <span className="absolute right-0 top-0 h-3.5 w-3.5 rounded-full bg-white/50 transition-all duration-500 ease-swift group-hover:right-0.5" />
+        </span>
+      </span>
+
       {!compact && (
-        <span className="text-[17px] font-extrabold tracking-tight">
-          <span className={light ? 'text-white' : 'text-navy-900'}>sales</span>
+        <span className="text-[17px] font-extrabold leading-none tracking-tighter">
+          <span className={light ? 'text-white' : 'text-ink'}>sales</span>
           <span className={light ? 'text-brand-300' : 'text-brand-600'}>motion</span>
         </span>
       )}
-      <span className="relative inline-block h-4 w-7 shrink-0">
-        <span
-          className={cx(
-            'absolute left-0 top-0 h-4 w-4 rounded-full',
-            // `light` means "drawn on the navy chrome", not "light theme" - this
-            // dot is white in both themes, so it must not use bg-surface.
-            light ? 'bg-white' : 'bg-navy-900'
-          )}
-        />
-        <span
-          className={cx(
-            'absolute right-0 top-0 h-4 w-4 rounded-full opacity-90',
-            light ? 'bg-brand-400' : 'bg-brand-600'
-          )}
-        />
-      </span>
     </span>
   );
 }
@@ -67,7 +72,7 @@ export function Button({
       {loading ? (
         <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />
       ) : (
-        Icon && <Icon size={size === 'sm' ? 14 : 16} />
+        Icon && <Icon size={size === 'sm' ? 14 : 16} className="shrink-0" />
       )}
       {children}
     </button>
@@ -78,11 +83,12 @@ export function Button({
 
 export function Card({
   className,
+  interactive = false,
   children,
   ...rest
-}: React.HTMLAttributes<HTMLDivElement>) {
+}: React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }) {
   return (
-    <div {...rest} className={cx('card', className)}>
+    <div {...rest} className={cx('card', interactive && 'card-interactive', className)}>
       {children}
     </div>
   );
@@ -121,16 +127,25 @@ export function PageHeader({
 }) {
   return (
     <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0">
+      <div className="min-w-0 animate-fade-in-up">
         {eyebrow && (
-          <p className="mb-1 text-2xs font-bold uppercase tracking-[0.14em] text-brand-600">
+          <p className="eyebrow mb-1.5 flex items-center gap-1.5 text-brand-600">
+            <span className="h-1 w-1 rounded-full bg-brand-500" aria-hidden />
             {eyebrow}
           </p>
         )}
-        <h1 className="text-[26px] font-extrabold leading-tight tracking-tight text-ink">{title}</h1>
-        {description && <p className="mt-1.5 max-w-2xl text-sm text-ink-muted">{description}</p>}
+        <h1 className="text-[28px] font-extrabold leading-[1.15] tracking-tighter text-ink">
+          {title}
+        </h1>
+        {description && (
+          <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-muted">
+            {description}
+          </p>
+        )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 animate-fade-in-up">{actions}</div>
+      )}
     </div>
   );
 }
@@ -149,6 +164,25 @@ export function Badge({
   return <span className={cx('badge', `badge-${tone}`, className)}>{children}</span>;
 }
 
+/**
+ * Live status dot with an expanding halo. Used wherever something is actively
+ * running - it reads as "in progress" without needing a word next to it.
+ */
+export function PulseDot({ tone = 'brand' }: { tone?: 'brand' | 'green' | 'amber' | 'red' }) {
+  const colors = {
+    brand: 'bg-brand-500',
+    green: 'bg-emerald-500',
+    amber: 'bg-amber-500',
+    red: 'bg-red-500',
+  };
+  return (
+    <span className="relative inline-flex h-2 w-2 shrink-0" aria-hidden>
+      <span className={cx('absolute inset-0 rounded-full animate-pulse-ring', colors[tone])} />
+      <span className={cx('relative inline-flex h-2 w-2 rounded-full', colors[tone])} />
+    </span>
+  );
+}
+
 export function Alert({
   tone = 'info',
   children,
@@ -163,14 +197,36 @@ export function Alert({
     error: 'border-red-200 bg-red-50 text-red-700',
     success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   };
-  const Icon = tone === 'error' ? AlertCircle : tone === 'success' ? Check : AlertCircle;
+  const chips = {
+    info: 'bg-brand-500/15 text-brand-600',
+    error: 'bg-red-500/15 text-red-600',
+    success: 'bg-emerald-500/15 text-emerald-600',
+  };
+  const Icon = tone === 'error' ? AlertCircle : tone === 'success' ? Check : Info;
 
   return (
-    <div className={cx('flex items-start gap-3 rounded-lg border px-4 py-3 text-sm', tones[tone])}>
-      <Icon size={16} className="mt-0.5 shrink-0" />
-      <div className="min-w-0 flex-1">{children}</div>
+    <div
+      role="status"
+      className={cx(
+        'flex animate-slide-down items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-card',
+        tones[tone]
+      )}
+    >
+      <span
+        className={cx(
+          'mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-lg',
+          chips[tone]
+        )}
+      >
+        <Icon size={14} />
+      </span>
+      <div className="min-w-0 flex-1 pt-0.5 leading-relaxed">{children}</div>
       {onDismiss && (
-        <button onClick={onDismiss} className="shrink-0 opacity-60 hover:opacity-100">
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="-mr-1 shrink-0 rounded-lg p-1 opacity-60 transition hover:bg-black/5 hover:opacity-100"
+        >
           <X size={15} />
         </button>
       )}
@@ -190,22 +246,34 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="card flex flex-col items-center px-6 py-14 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100">
-        <Icon size={22} className="text-ink-faint" />
+    <div className="card animate-fade-in-up flex flex-col items-center overflow-hidden px-6 py-16 text-center">
+      {/* Halo behind the glyph - stops a lone grey icon reading as an error */}
+      <div className="relative mb-5 flex h-16 w-16 items-center justify-center">
+        <span
+          className="absolute inset-0 rounded-2xl bg-brand-500/10 blur-xl"
+          aria-hidden
+        />
+        <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-surface shadow-card">
+          <Icon size={24} className="text-brand-500" />
+        </span>
       </div>
-      <h3 className="text-base font-semibold text-ink">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-ink-muted">{description}</p>}
-      {action && <div className="mt-5">{action}</div>}
+      <h3 className="text-[17px] font-bold tracking-tight text-ink">{title}</h3>
+      {description && (
+        <p className="mt-2 max-w-sm text-sm leading-relaxed text-ink-muted">{description}</p>
+      )}
+      {action && <div className="mt-6">{action}</div>}
     </div>
   );
 }
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2.5 py-14 text-sm text-ink-muted">
-      <Loader2 size={16} className="animate-spin" />
-      {label || 'Loading…'}
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-sm text-ink-muted">
+      <span className="relative flex h-9 w-9 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-brand-500/10 blur-md" aria-hidden />
+        <Loader2 size={22} className="relative animate-spin text-brand-500" />
+      </span>
+      <span className="font-medium">{label || 'Loading…'}</span>
     </div>
   );
 }
@@ -214,12 +282,50 @@ export function SkeletonRows({ rows = 3 }: { rows?: number }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="card card-pad">
-          <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200" />
-          <div className="mt-3 h-3 w-2/3 animate-pulse rounded bg-slate-100" />
-          <div className="mt-2 h-3 w-1/2 animate-pulse rounded bg-slate-100" />
+        <div key={i} className="card card-pad shimmer" style={stagger(i)}>
+          <div className="flex items-center gap-4">
+            <div className="h-11 w-11 shrink-0 rounded-xl bg-slate-200" />
+            <div className="min-w-0 flex-1">
+              <div className="h-3.5 w-1/3 rounded-full bg-slate-200" />
+              <div className="mt-2.5 h-3 w-2/3 rounded-full bg-slate-100" />
+            </div>
+          </div>
+          <div className="mt-4 h-3 w-1/2 rounded-full bg-slate-100" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Determinate bar when the server has reported a percentage, an indeterminate
+ * sweep when it has not - a bar frozen at 10% reads as a stalled job.
+ */
+export function ProgressBar({
+  percent,
+  className,
+}: {
+  percent?: number;
+  className?: string;
+}) {
+  const known = typeof percent === 'number' && percent > 0;
+
+  return (
+    <div
+      className={cx('h-1.5 w-full overflow-hidden rounded-full bg-slate-100', className)}
+      role="progressbar"
+      aria-valuenow={known ? percent : undefined}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      {known ? (
+        <div
+          className="h-full rounded-full bg-brand-gradient transition-[width] duration-700 ease-swift"
+          style={{ width: `${Math.min(100, percent!)}%` }}
+        />
+      ) : (
+        <div className="h-full w-1/4 animate-progress-sweep rounded-full bg-brand-gradient" />
+      )}
     </div>
   );
 }
@@ -266,7 +372,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
       <div
-        className="fixed inset-0 bg-navy-950/40 backdrop-blur-[2px]"
+        className="fixed inset-0 animate-fade-in bg-navy-950/55 backdrop-blur-[3px]"
         onClick={onClose}
         aria-hidden
       />
@@ -274,16 +380,22 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={cx(
-          'relative my-auto w-full animate-scale-in rounded-2xl bg-surface shadow-pop',
+          'relative my-auto w-full animate-scale-in rounded-2xl border border-slate-200/70 bg-surface shadow-pop',
           size === 'lg' ? 'max-w-3xl' : 'max-w-xl'
         )}
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
-          <div>
-            <h2 className="text-base font-bold text-ink">{title}</h2>
-            {description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-bold tracking-tight text-ink">{title}</h2>
+            {description && (
+              <p className="mt-1 text-[13.5px] leading-relaxed text-ink-muted">{description}</p>
+            )}
           </div>
-          <button onClick={onClose} className="btn btn-ghost -mr-2 h-8 w-8 rounded-lg p-0">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="btn btn-ghost -mr-2 h-8 w-8 rounded-lg p-0"
+          >
             <X size={17} />
           </button>
         </div>
@@ -291,7 +403,7 @@ export function Modal({
         <div className="max-h-[calc(100vh-16rem)] overflow-y-auto px-6 py-5">{children}</div>
 
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <div className="flex items-center justify-end gap-2 rounded-b-2xl border-t border-slate-200 bg-surface-2 px-6 py-4">
             {footer}
           </div>
         )}
@@ -323,7 +435,10 @@ export function Field({
       </label>
       {children}
       {error ? (
-        <p className="mt-1.5 text-xs font-medium text-red-600">{error}</p>
+        <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-red-600">
+          <AlertCircle size={12} className="shrink-0" />
+          {error}
+        </p>
       ) : (
         hint && <p className="hint">{hint}</p>
       )}
@@ -375,12 +490,12 @@ export function TagInput({
     <div>
       <div
         onClick={() => inputRef.current?.focus()}
-        className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg border border-slate-300 bg-surface px-2.5 py-2 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20"
+        className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-surface px-2.5 py-2 shadow-inset transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 hover:border-slate-300"
       >
         {value.map((tag, i) => (
           <span
             key={`${tag}-${i}`}
-            className="inline-flex items-center gap-1 rounded-md bg-brand-50 py-1 pl-2 pr-1 text-[13px] font-medium text-brand-700"
+            className="inline-flex animate-scale-in items-center gap-1 rounded-lg bg-brand-50 py-1 pl-2.5 pr-1 text-[13px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200"
           >
             {tag}
             <button
@@ -389,7 +504,7 @@ export function TagInput({
                 e.stopPropagation();
                 remove(i);
               }}
-              className="rounded p-0.5 text-brand-500 hover:bg-brand-100 hover:text-brand-700"
+              className="rounded p-0.5 text-brand-500 transition hover:bg-brand-100 hover:text-brand-700"
               aria-label={`Remove ${tag}`}
             >
               <X size={12} />
@@ -423,16 +538,14 @@ export function TagInput({
       </div>
 
       {unusedSuggestions.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-2xs font-semibold uppercase tracking-wide text-ink-faint">
-            Suggested
-          </span>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="eyebrow text-ink-faint">Suggested</span>
           {unusedSuggestions.slice(0, 8).map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => add(s)}
-              className="rounded-md border border-dashed border-slate-300 px-2 py-0.5 text-[12px] text-ink-muted transition hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700"
+              className="rounded-lg border border-dashed border-slate-300 px-2 py-0.5 text-[12px] text-ink-muted transition hover:-translate-y-px hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700"
             >
               + {s}
             </button>
@@ -445,6 +558,10 @@ export function TagInput({
 
 // --- Score ring -----------------------------------------------------------
 
+/**
+ * The fit score. The arc sweeps and the number counts up on mount, so the
+ * headline metric of the whole product arrives with some weight behind it.
+ */
 export function ScoreRing({
   value,
   band,
@@ -454,24 +571,65 @@ export function ScoreRing({
   band?: string;
   size?: number;
 }) {
+  // Two rings on one page must not share a gradient id, or the second wins
+  const gradientId = `score-${useId().replace(/:/g, '')}`;
+
   const stroke = size >= 80 ? 8 : 6;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const pct = Math.max(0, Math.min(100, value)) / 100;
+  const target = Math.max(0, Math.min(100, value));
 
-  const color =
-    value >= 80 ? '#059669' : value >= 60 ? '#2563eb' : value >= 40 ? '#f59e0b' : '#94a3b8';
+  // Count-up. Starts from 0 on every mount rather than tweening between values,
+  // because the score only ever changes by way of a fresh report.
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      setShown(target);
+      return;
+    }
+
+    let frame = 0;
+    const start = performance.now();
+    const duration = 900;
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      // Ease-out cubic: fast to begin, gentle at the finish
+      setShown(Math.round(target * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+
+  const [from, to] =
+    target >= 80
+      ? ['#10b981', '#059669']
+      : target >= 60
+      ? ['#3b82f6', '#4f46e5']
+      : target >= 40
+      ? ['#f59e0b', '#ea580c']
+      : ['#94a3b8', '#64748b'];
 
   return (
     <div className="inline-flex flex-col items-center">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90">
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="-rotate-90 overflow-visible">
+          <defs>
+            <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor={from} />
+              <stop offset="100%" stopColor={to} />
+            </linearGradient>
+          </defs>
+
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="#e2e8f0"
+            className="stroke-slate-200"
             strokeWidth={stroke}
           />
           <circle
@@ -479,27 +637,27 @@ export function ScoreRing({
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke={color}
+            stroke={`url(#${gradientId})`}
             strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - pct)}
-            style={{ transition: 'stroke-dashoffset 700ms ease-out' }}
+            strokeDashoffset={circumference * (1 - shown / 100)}
+            style={{ filter: `drop-shadow(0 1px 4px ${to}55)` }}
           />
         </svg>
+
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span
-            className="font-extrabold leading-none"
-            style={{ color, fontSize: size * 0.3 }}
+            className="font-extrabold leading-none tracking-tighter tabular-nums"
+            style={{ color: to, fontSize: size * 0.31 }}
           >
-            {value}
+            {shown}
           </span>
         </div>
       </div>
+
       {band && (
-        <span className="mt-1.5 text-2xs font-bold uppercase tracking-wider text-ink-muted">
-          {band}
-        </span>
+        <span className="eyebrow mt-2 text-center text-ink-muted">{band}</span>
       )}
     </div>
   );

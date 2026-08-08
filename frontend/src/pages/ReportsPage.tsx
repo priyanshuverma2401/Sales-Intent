@@ -14,7 +14,17 @@ import {
 } from 'lucide-react';
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
 import AddAccountModal from '../components/AddAccountModal';
-import { Alert, Button, EmptyState, PageHeader, ScoreRing, SkeletonRows, cx } from '../components/ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  ProgressBar,
+  ScoreRing,
+  SkeletonRows,
+  cx,
+  stagger,
+} from '../components/ui';
 
 interface ReportSummary {
   _id: string;
@@ -126,7 +136,7 @@ export default function ReportsPage() {
         report.pdfFileName || `salesmotion-${report.companyName}.pdf`
       );
     } catch (err) {
-      setMessage({ tone: 'error', text: 'Download failed — the PDF may still be rendering.' });
+      setMessage({ tone: 'error', text: 'Download failed — the PDF may still be preparing.' });
     } finally {
       setBusyId(null);
     }
@@ -151,9 +161,9 @@ export default function ReportsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Intelligence"
+        eyebrow="Research"
         title="Reports"
-        description="Every brief your team has generated, newest first."
+        description="Every report your team has created, newest first."
         actions={
           <Button icon={Plus} onClick={() => setModalOpen(true)}>
             New report
@@ -190,9 +200,9 @@ export default function ReportsPage() {
             className="input w-auto min-w-[170px]"
             value={authorId}
             onChange={(e) => setAuthorId(e.target.value)}
-            aria-label="Filter by who generated the report"
+            aria-label="Filter by who created the report"
           >
-            <option value="all">All researchers</option>
+            <option value="all">Anyone on the team</option>
             {options.authors.map((a) => (
               <option key={a._id} value={a._id}>
                 {a.name}
@@ -224,7 +234,7 @@ export default function ReportsPage() {
             </button>
           )}
 
-          <span className="ml-auto shrink-0 text-[13px] text-ink-muted">
+          <span className="ml-auto shrink-0 text-[13px] font-medium text-ink-muted">
             {filtersActive ? `${reports.length} of ${total}` : `${total} reports`}
           </span>
         </div>
@@ -236,7 +246,7 @@ export default function ReportsPage() {
         <EmptyState
           icon={Search}
           title="Nothing matches those filters"
-          description="No report in your team matches what you are looking for."
+          description="No report on your team matches what you are looking for."
           action={
             <Button variant="secondary" icon={X} onClick={clearFilters}>
               Clear filters
@@ -247,7 +257,7 @@ export default function ReportsPage() {
         <EmptyState
           icon={FileText}
           title="No reports yet"
-          description="Add an account and we will research it, score the fit and write the brief."
+          description="Add a company and we will research it, score how well it fits what you sell, and write the report for you."
           action={
             <Button icon={Plus} onClick={() => setModalOpen(true)}>
               Create your first report
@@ -255,18 +265,16 @@ export default function ReportsPage() {
           }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {reports.map((report) => {
+        <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {reports.map((report, i) => {
             const busy = busyId === report._id;
             const done = report.status === 'complete';
 
             return (
               <div
                 key={report._id}
-                className={cx(
-                  'card flex flex-col overflow-hidden transition',
-                  done && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-raised'
-                )}
+                style={stagger(i)}
+                className={cx('card flex flex-col overflow-hidden', done && 'card-interactive')}
                 onClick={() => done && navigate(`/reports/${report._id}`)}
               >
                 <div className="flex-1 p-5">
@@ -285,7 +293,7 @@ export default function ReportsPage() {
                       <p className="mt-0.5 truncate text-[13px] text-ink-muted">
                         {[report.fastFacts?.industry, report.fastFacts?.headquarters]
                           .filter(Boolean)
-                          .join(' · ') || 'Account brief'}
+                          .join(' · ') || 'Company report'}
                       </p>
                       {report.context?.sellerName && (
                         <p className="mt-1.5 flex items-center gap-1.5 text-2xs text-ink-muted">
@@ -297,7 +305,7 @@ export default function ReportsPage() {
                       )}
                       {report.author && !report.isMine && (
                         <p className="mt-1 truncate text-2xs text-ink-faint">
-                          Researched by {report.author.name}
+                          Created by {report.author.name}
                         </p>
                       )}
                     </div>
@@ -317,8 +325,8 @@ export default function ReportsPage() {
                       {(report.context.priorityTopics || []).slice(0, 3).map((topic) => (
                         <span
                           key={topic}
-                          title="High priority"
-                          className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700"
+                          title="Top priority"
+                          className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"
                         >
                           {topic}
                         </span>
@@ -328,7 +336,7 @@ export default function ReportsPage() {
                         .map((topic) => (
                           <span
                             key={topic}
-                            className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700"
+                            className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200"
                           >
                             {topic}
                           </span>
@@ -344,26 +352,21 @@ export default function ReportsPage() {
 
                   {report.status === 'pending' && (
                     <div className="mt-4">
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-brand-500 transition-all duration-700"
-                          style={{ width: `${report.progress?.percent || 10}%` }}
-                        />
-                      </div>
+                      <ProgressBar percent={report.progress?.percent} />
                       <p className="mt-2 text-2xs font-medium text-ink-muted">
-                        {report.progress?.step || 'Queued'}
+                        {report.progress?.step || 'Waiting to start'}
                       </p>
                     </div>
                   )}
 
                   {report.status === 'failed' && (
                     <p className="mt-3 line-clamp-2 rounded-lg bg-red-50 px-3 py-2 text-[13px] text-red-700">
-                      {report.error || 'Generation failed'}
+                      {report.error || 'This report did not finish'}
                     </p>
                   )}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-2.5">
+                <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-surface-2 px-4 py-2.5">
                   <span className="text-2xs text-ink-faint">
                     {new Date(report.generatedAt).toLocaleDateString(undefined, {
                       month: 'short',

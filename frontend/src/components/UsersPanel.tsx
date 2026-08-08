@@ -171,25 +171,25 @@ export default function UsersPanel({
     <>
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-6 py-5">
-          <h2 className="text-lg font-bold tracking-tight text-ink">Users</h2>
+          <h2 className="text-lg font-bold tracking-tight text-ink">Your team</h2>
           <Badge tone="neutral">
             {members.length}
-            {seats ? ` of ${seats}` : ''} seats used
+            {seats ? ` of ${seats}` : ''} places taken
           </Badge>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 border-b border-slate-300 px-1 focus-within:border-brand-500">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 shadow-inset transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 hover:border-slate-300">
               <Search size={15} className="shrink-0 text-ink-faint" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by name or email"
-                className="w-56 border-0 bg-transparent py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint"
+                className="w-56 border-0 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-ink-faint"
               />
             </div>
             {isManager && (
               <Button icon={Plus} onClick={() => setAdding(true)}>
-                Add User
+                Add someone
               </Button>
             )}
           </div>
@@ -199,12 +199,12 @@ export default function UsersPanel({
           <Spinner />
         ) : sorted.length === 0 ? (
           <p className="border-t border-slate-100 px-6 py-10 text-center text-sm text-ink-muted">
-            {search ? `No users match “${search}”.` : 'No users yet.'}
+            {search ? `Nobody matches “${search}”.` : 'Nobody here yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left">
-              <thead className="border-y border-slate-100 bg-slate-50">
+              <thead className="border-y border-slate-100 bg-surface-2">
                 <tr>
                   <SortableHeader label="Name" active={sort} sortKey="name" onSort={toggleSort} />
                   <SortableHeader label="Email" active={sort} sortKey="email" onSort={toggleSort} />
@@ -589,8 +589,8 @@ function AddUserModal({
     <Modal
       open
       onClose={onClose}
-      title="Add User"
-      description="Creates a seat straight away. Share the password with them; they can change it later."
+      title="Add someone to your team"
+      description="They can sign in right away. Share the password with them — they can change it later."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
