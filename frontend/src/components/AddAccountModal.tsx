@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Building2, Loader2, Search } from 'lucide-react';
 import { apiError, companiesAPI } from '../services/api';
 import { Alert, Button, Field, Modal } from '../components/ui';
@@ -9,40 +9,62 @@ interface SearchResult {
   ticker?: string;
   industry?: string;
   source?: string;
-  snippet?: string;
   website?: string;
   logoUrl?: string;
+  // What to try when the first mark 404s - see CompanyMark
+  logoFallbackUrl?: string;
   wikidataId?: string;
 }
 
 /**
- * The company's mark, or its initial while one loads and after one fails.
+ * The company's mark, falling back through what we have and then to its
+ * initial.
  *
- * A logo is the fastest way to tell the Microsoft you meant from the four
- * showcase pages that share its name, but the sources behind them - Wikimedia
- * Commons and site favicons - both 404 often enough that a broken image icon
- * would be a regular sight without this.
+ * A logo is the fastest way to tell the Microsoft you meant from the showcase
+ * pages that share its name, but no single source has one for every company:
+ * the brand CDN misses the obscure domains, Wikimedia Commons misses the
+ * private ones. Each source is tried in turn rather than showing a broken
+ * image icon, which is what a plain <img> would do here several times a page.
  */
-function CompanyMark({ name, logoUrl }: { name: string; logoUrl?: string }) {
-  const [failed, setFailed] = useState(false);
+function CompanyMark({
+  name,
+  logoUrl,
+  fallbackUrl,
+  size = 'sm',
+}: {
+  name: string;
+  logoUrl?: string;
+  fallbackUrl?: string;
+  size?: 'sm' | 'md';
+}) {
+  const sources = useMemo(
+    () => [logoUrl, fallbackUrl].filter(Boolean) as string[],
+    [logoUrl, fallbackUrl]
+  );
+  const [attempt, setAttempt] = useState(0);
 
-  useEffect(() => setFailed(false), [logoUrl]);
+  useEffect(() => setAttempt(0), [sources]);
 
-  if (logoUrl && !failed) {
+  const box = size === 'md' ? 'h-10 w-10' : 'h-9 w-9';
+  const current = sources[attempt];
+
+  if (current) {
     return (
       <img
-        src={logoUrl}
+        src={current}
         alt=""
         loading="lazy"
-        onError={() => setFailed(true)}
-        className="h-8 w-8 shrink-0 rounded-md border border-slate-200 bg-white object-contain p-0.5"
+        onError={() => setAttempt((i) => i + 1)}
+        className={`${box} shrink-0 rounded-lg border border-slate-200 bg-white object-contain p-1`}
       />
     );
   }
 
   return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-ink-faint">
-      {name?.trim()?.[0] || <Building2 size={14} />}
+    <div
+      className={`${box} flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-semibold uppercase text-ink-faint`}
+    >
+      {name?.trim()?.[0] || <Building2 size={15} />}
     </div>
   );
 }
@@ -125,8 +147,10 @@ export default function AddAccountModal({
         name,
         ticker: selected?.ticker || undefined,
         // Which company was picked, not just what it is called - the server
-        // enriches from this entity rather than searching the name again
+        // enriches from this entity and homepage rather than searching the
+        // name again and hoping it lands on the same company
         wikidataId: selected?.wikidataId || undefined,
+        website: selected?.website || undefined,
         generateReport: true,
       });
 
@@ -168,19 +192,19 @@ export default function AddAccountModal({
         {selected ? (
           <div className="flex animate-scale-in items-start justify-between gap-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3.5">
             <div className="flex min-w-0 gap-3">
-              <CompanyMark name={selected.name} logoUrl={selected.logoUrl} />
+              <CompanyMark
+                name={selected.name}
+                logoUrl={selected.logoUrl}
+                fallbackUrl={selected.logoFallbackUrl}
+                size="md"
+              />
               <div className="min-w-0">
                 <p className="truncate font-semibold text-ink">{selected.name}</p>
-                {/* Website first: it is the one line that confirms the right
-                    HDFC was picked before a report is generated against it */}
-                <p className="truncate text-xs text-ink-muted">
-                  {[
-                    selected.website,
-                    selected.industry,
-                    selected.source === 'local' ? 'Already in your list' : 'Found online',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+                {/* The homepage, and nothing else: it is the one line that
+                    confirms the right HDFC was picked before a report is
+                    generated against it */}
+                <p className="truncate text-xs font-semibold text-brand-700">
+                  {selected.website || 'No website on record'}
                 </p>
               </div>
             </div>
@@ -223,7 +247,16 @@ export default function AddAccountModal({
                     onClick={() => choose(result)}
                     className="flex w-full items-start gap-3 border-b border-slate-100 px-3.5 py-2.5 text-left transition last:border-0 hover:bg-brand-50"
                   >
-                    <CompanyMark name={result.name} logoUrl={result.logoUrl} />
+                    <CompanyMark
+                      name={result.name}
+                      logoUrl={result.logoUrl}
+                      fallbackUrl={result.logoFallbackUrl}
+                    />
+                    {/* Name, mark and domain - nothing else. The descriptions
+                        these sources write are what made the list hard to read:
+                        HDFC Bank, HDFC Life and HDFC ERGO are all "an Indian
+                        financial services company", and it is the domain that
+                        actually settles which one the rep meant. */}
                     <div className="min-w-0 flex-1">
                       <p className="flex items-baseline gap-2 text-sm font-medium text-ink">
                         <span className="truncate">{result.name}</span>
@@ -233,16 +266,8 @@ export default function AddAccountModal({
                           </span>
                         )}
                       </p>
-                      {(result.snippet || result.industry) && (
-                        <p className="truncate text-xs text-ink-muted">
-                          {result.industry || result.snippet}
-                        </p>
-                      )}
-                      {/* The domain is what separates HDFC Bank from HDFC Life
-                          from HDFC ERGO - their descriptions all read the same,
-                          so it sits on its own line under the one it settles. */}
                       {result.website && (
-                        <p className="mt-0.5 truncate text-xs font-semibold text-brand-600">
+                        <p className="truncate text-xs font-semibold text-brand-600">
                           {result.website}
                         </p>
                       )}

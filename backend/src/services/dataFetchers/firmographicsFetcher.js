@@ -130,6 +130,10 @@ class FirmographicsFetcher {
         // company's registered name and is the better thing to show
         label: hit.label || hit.match?.text || hit.id,
         description: hit.description,
+        // Which string actually matched. "Larsen & Toubro" answers a search for
+        // "L&T" through its alias and must be kept; the items this search
+        // returns on a fuzzy near-miss match nothing at all, and are noise.
+        matchedText: hit.match?.text,
       }));
   }
 
@@ -252,10 +256,10 @@ class FirmographicsFetcher {
    *
    * A bare name search for "Apple" returns the fruit, the record label and the
    * borough before the manufacturer, so the first hit cannot simply be taken.
-   * A matching ticker settles it outright; failing that, the candidate carrying
-   * the most company-shaped properties wins.
+   * A matching ticker or homepage settles it outright; failing that, the
+   * candidate carrying the most company-shaped properties wins.
    */
-  score(entity, ticker) {
+  score(entity, ticker, domain) {
     const claims = entity.claims || {};
 
     let score = [P.headquarters, P.industry, P.employees, P.revenue, P.website, P.exchange]
@@ -263,7 +267,24 @@ class FirmographicsFetcher {
 
     if (ticker && this.tickers(entity).includes(String(ticker).toUpperCase())) score += 10;
 
+    // The homepage is the one identifier a company shares with nothing else.
+    // When the rep picked a suggestion, we know it - and "the Wikidata item
+    // whose website is uber.com" is not a guess the way "the item labelled
+    // Uber" is.
+    if (domain && this.host(this.best(claims[P.website])?.mainsnak?.datavalue?.value) === domain) {
+      score += 20;
+    }
+
     return score;
+  }
+
+  host(url) {
+    return String(url || '')
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .replace(/\/.*$/, '')
+      .toLowerCase() || null;
   }
 
   // ---- main entry point ---------------------------------------------------
@@ -283,12 +304,16 @@ class FirmographicsFetcher {
    * @param {string} [options.wikidataId] the entity the account was picked from
    *   in the search box. Given it, the name search - and the chance of matching
    *   a different company that shares the name - is skipped entirely.
+   * @param {string} [options.domain] the account's homepage. Where there is no
+   *   entity to go on, this is what decides between the companies that share a
+   *   name - and getting that wrong is how a cover ends up quoting somebody
+   *   else's headcount.
    */
-  async fetch(companyName, ticker, { wikidataId } = {}) {
+  async fetch(companyName, ticker, { wikidataId, domain } = {}) {
     if (!companyName) return null;
 
     const [wikidata, infobox] = await Promise.allSettled([
-      this.fromWikidata(companyName, ticker, wikidataId),
+      this.fromWikidata(companyName, ticker, wikidataId, this.host(domain)),
       infoboxFetcher.fetch(companyName),
     ]);
 
@@ -349,7 +374,7 @@ class FirmographicsFetcher {
   }
 
   /** Throws when the lookup fails; resolves null when nothing matches. */
-  async fromWikidata(companyName, ticker, wikidataId) {
+  async fromWikidata(companyName, ticker, wikidataId, domain) {
     // The rep already told us which company this is by picking it out of the
     // suggestions, so that entity is read straight off rather than searched for
     if (wikidataId) {
@@ -366,7 +391,7 @@ class FirmographicsFetcher {
     let entity = null;
     let bestScore = 0;
     for (const candidate of Object.values(candidates)) {
-      const score = this.score(candidate, ticker);
+      const score = this.score(candidate, ticker, domain);
       if (score > bestScore) {
         bestScore = score;
         entity = candidate;

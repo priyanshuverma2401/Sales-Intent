@@ -1,6 +1,8 @@
 const axios = require('axios');
 const financialDataFetcher = require('./financialDataFetcher');
 const firmographicsFetcher = require('./firmographicsFetcher');
+const logoDevFetcher = require('./logoDevFetcher');
+const brandfetchFetcher = require('./brandfetchFetcher');
 
 // Wikipedia's API rejects requests without a descriptive User-Agent
 const WIKI_HEADERS = {
@@ -42,6 +44,40 @@ const ORGANISATION_CLAIMS = [
 // Industry is the one property above that a product states as readily as the
 // company that makes it, so it is left out when the two have to be told apart
 const STRONG_ORGANISATION_CLAIMS = ORGANISATION_CLAIMS.filter(property => property !== 'P452');
+
+/**
+ * Properties nothing but an incorporated company carries.
+ *
+ * These settle the conflated items. Uber's Wikidata item is the company *and*
+ * the app in one: it states a developer, a platform and "instance of software"
+ * right next to its revenue, headcount and legal form - and the product rules
+ * below would read the first half and throw the company out of its own search
+ * results. Nothing that is merely software has employees, revenue, a CEO or a
+ * legal form, so any of these wins outright.
+ *
+ * Stock exchange (P414) is deliberately absent: Salesforce Marketing Cloud
+ * inherits its parent's listing, and it really is a product.
+ */
+const CORPORATE_CLAIMS = [
+  'P1454', // legal form
+  'P1128', // employees
+  'P2139', // revenue
+  'P169',  // chief executive officer
+];
+
+/**
+ * How the company behind a work is stated on the work's own item.
+ *
+ * People search for what they know - "snapchat", not "Snap Inc." - and the
+ * thing they typed is a product whose maker is the actual prospect. These
+ * properties point from the one to the other.
+ */
+const MAKER_CLAIMS = [
+  'P178',  // developer
+  'P176',  // manufacturer
+  'P123',  // publisher
+  'P127',  // owned by
+];
 
 /**
  * Properties only a *work* carries - software, a film, a book, an album.
@@ -103,10 +139,6 @@ const NEVER_AN_ACCOUNT = new Set([
   'Q101352',   // family name
   'Q202444',   // given name
   'Q618779',   // award
-  'Q7397',     // software
-  'Q11424',    // film
-  'Q7889',     // video game
-  'Q571',      // book
   // Places, because a company name is often a place name too - searching
   // "zoho" turns up the Slovak village of Zohor and its railway station
   'Q532',      // village
@@ -115,6 +147,26 @@ const NEVER_AN_ACCOUNT = new Set([
   'Q486972',   // human settlement
   'Q55488',    // railway station
   'Q928830',   // metro station
+  // Nature and works of art, which brand names collide with constantly -
+  // "uber" is also a genus of gastropods, "snapchat" also a song
+  'Q16521',    // taxon
+  'Q7366',     // song
+  'Q134556',   // single
+  'Q105543609',// musical work/composition
+  'Q2188189',  // musical work
+]);
+
+/**
+ * Classes that mean "this is a work, not its maker" - unless the item also
+ * carries corporate claims, because Wikidata conflates a company with its
+ * flagship product often enough (Uber is filed as software) that the class
+ * alone cannot be trusted to exclude.
+ */
+const WORK_CLASSES = new Set([
+  'Q7397',     // software
+  'Q11424',    // film
+  'Q7889',     // video game
+  'Q571',      // book
 ]);
 
 /**
@@ -205,8 +257,10 @@ class CompanyDataFetcher {
   }
 
   // Fetch company info from multiple sources
-  async fetchCompanyInfo(companyName, ticker, { wikidataId } = {}) {
+  async fetchCompanyInfo(companyName, ticker, { wikidataId, domain } = {}) {
     console.log(`🏢 Fetching company info for ${companyName}`);
+
+    const homepage = logoDevFetcher.hostname(domain);
 
     let companyInfo = {
       name: companyName,
@@ -220,7 +274,7 @@ class CompanyDataFetcher {
       // keyless install, and the report cover is built out of exactly those.
       // A failure here must not sink the whole enrichment - `backfill` retries
       // it when the report is generated.
-      firmographicsFetcher.fetch(companyName, ticker, { wikidataId }).catch(error => {
+      firmographicsFetcher.fetch(companyName, ticker, { wikidataId, domain: homepage }).catch(error => {
         console.warn(`⚠️ Firmographics unavailable for ${companyName}: ${error.message}`);
         return null;
       }),
@@ -258,10 +312,50 @@ class CompanyDataFetcher {
       if (!companyInfo.ticker) companyInfo.ticker = fundamentals.ticker;
     }
 
-    // Sources that state "this is the logo" come first. The article's lead image
-    // is a guess at one and is only better than showing nothing.
+    // The homepage the rep picked the account by. Kept as the fallback rather
+    // than the winner, since Wikidata states the registered site and this is
+    // whatever the brand index had - but a company with no public record at all
+    // now has a website on its cover where it used to have a blank line.
+    if (!companyInfo.website && homepage) companyInfo.website = `https://${homepage}`;
+
+    // Brandfetch is asked last because it is asked by domain, and the domain is
+    // only settled once the sources above have had their say. It is the only
+    // one of them that answers for a private company, which is where every
+    // "Headquartered in Unknown" on a cover comes from - so it fills whatever
+    // is still blank rather than competing for what is already known.
+    const brand = await brandfetchFetcher.brand(
+      homepage || this.hostname(companyInfo.website)
+    );
+
+    if (brand) {
+      for (const key of ['city', 'state', 'country', 'employees', 'foundedYear', 'industry', 'description', 'website']) {
+        if (!companyInfo[key] && brand[key]) companyInfo[key] = brand[key];
+      }
+
+      // Wikidata's identifiers are curated, so they win where both know a
+      // company - but Brandfetch reads the links off the company's own site,
+      // which is the only source for the accounts Wikidata has never heard of
+      companyInfo.profiles = {
+        ...brand.profiles,
+        ...Object.fromEntries(
+          Object.entries(companyInfo.profiles || {}).filter(([, value]) => value)
+        ),
+      };
+    }
+
+    // Sources that state "this is the logo" come first: Wikidata names the mark
+    // a company itself uses, then Brandfetch's own asset. The CDN links behind
+    // them render something for any domain, and the article's lead image last -
+    // for Infosys that is a photograph of the campus.
+    const logoDomain = homepage || this.hostname(companyInfo.website);
     companyInfo.logo =
-      firmographics?.logoUrl || fundamentals?.logo || companyInfo.pageImage || undefined;
+      firmographics?.logoUrl ||
+      brand?.logoUrl ||
+      logoDevFetcher.imageUrl(logoDomain, { size: 256 }) ||
+      brandfetchFetcher.logoUrl(logoDomain, { size: 256, type: 'logo' }) ||
+      fundamentals?.logo ||
+      companyInfo.pageImage ||
+      undefined;
     delete companyInfo.pageImage;
 
     console.log('✅ Company info fetched');
@@ -326,6 +420,7 @@ class CompanyDataFetcher {
     try {
       facts = await firmographicsFetcher.fetch(company.name, company.ticker, {
         wikidataId: company.wikidataId,
+        domain: company.website,
       });
     } catch (error) {
       // The lookup never completed - Wikidata and Wikipedia both throttle
@@ -337,6 +432,11 @@ class CompanyDataFetcher {
       return false;
     }
 
+    // Asked whatever Wikidata said, and by domain rather than by name: an
+    // account Wikidata has never heard of is exactly the one whose cover reads
+    // "Headquartered in Unknown", and this is the source that answers for it.
+    const brand = await brandfetchFetcher.brand(company.website || facts?.website);
+
     // Record the attempt either way, so a miss is not retried on every report
     if (!company.dataSources) company.dataSources = {};
     company.dataSources.wikidata = {
@@ -344,7 +444,7 @@ class CompanyDataFetcher {
       status: facts ? 'success' : 'empty',
     };
 
-    if (!facts) {
+    if (!facts && !brand) {
       await company.save();
       return false;
     }
@@ -357,34 +457,58 @@ class CompanyDataFetcher {
       changed = true;
     };
 
-    fill('city', facts.city);
-    fill('employees', facts.employees);
-    fill('foundedYear', facts.foundedYear);
-    fill('industry', facts.industry);
-    fill('website', facts.website);
-    fill('wikidataId', facts.wikidataId);
+    // Wikidata first on every field, Brandfetch behind it - one is curated and
+    // attributable, the other is read off the company's own site. Where
+    // Wikidata is silent, which for a private prospect is everywhere, whatever
+    // Brandfetch knows is the only thing standing between the cover and a blank
+    fill('city', facts?.city || brand?.city);
+    fill('state', facts?.state || brand?.state);
+    fill('employees', facts?.employees || brand?.employees);
+    fill('foundedYear', facts?.foundedYear || brand?.foundedYear);
+    fill('industry', facts?.industry || brand?.industry);
+    fill('website', facts?.website || brand?.website);
+    fill('description', brand?.description);
+    fill('wikidataId', facts?.wikidataId);
 
     for (const site of ['linkedin', 'crunchbase']) {
-      if (facts.profiles?.[site] && !company.profiles?.[site]) {
-        company.profiles = { ...(company.profiles?.toObject?.() ?? company.profiles ?? {}), [site]: facts.profiles[site] };
+      const url = facts?.profiles?.[site] || brand?.profiles?.[site];
+      if (url && !company.profiles?.[site]) {
+        company.profiles = { ...(company.profiles?.toObject?.() ?? company.profiles ?? {}), [site]: url };
         changed = true;
       }
     }
 
-    if ((!company.country || company.country === 'Unknown') && facts.country) {
-      company.country = facts.country;
+    const country = facts?.country || brand?.country;
+    if ((!company.country || company.country === 'Unknown') && country) {
+      company.country = country;
       changed = true;
     }
 
     // The one field that is overwritten rather than merely filled: accounts
     // added earlier stored the article's lead image, which for Infosys is a
-    // photograph of the campus. A logo Wikidata names as the logo replaces it.
-    if (needsLogo && facts.logoUrl) {
-      company.logoUrl = facts.logoUrl;
+    // photograph of the campus. A logo one of these sources names as *the*
+    // logo replaces it.
+    const namedLogo = facts?.logoUrl || brand?.logoUrl;
+    if (needsLogo && namedLogo) {
+      company.logoUrl = namedLogo;
       changed = true;
     }
 
-    if (needsRevenue && facts.revenue) {
+    // Still nothing, but we know where the company lives on the web: the brand
+    // CDNs render a mark for most domains, and it is what puts a logo on the
+    // cover of every account with no logo item anywhere.
+    if (!company.logoUrl || this.isArticleImage(company.logoUrl)) {
+      const domain = this.hostname(company.website);
+      const brandLogo =
+        logoDevFetcher.imageUrl(domain, { size: 256 }) ||
+        brandfetchFetcher.logoUrl(domain, { size: 256, type: 'logo' });
+      if (brandLogo) {
+        company.logoUrl = brandLogo;
+        changed = true;
+      }
+    }
+
+    if (needsRevenue && facts?.revenue) {
       // Assigning into the subdocument keeps the rest of financials intact
       company.financials = {
         ...(company.financials?.toObject?.() ?? company.financials ?? {}),
@@ -431,8 +555,13 @@ class CompanyDataFetcher {
    * Name suggestions for the "Add an account" box, each with its homepage and
    * logo.
    *
-   * Two searches run, because neither answers on its own:
+   * Several searches run, because none answers on its own:
    *
+   * - The brand indexes - logo.dev and Brandfetch - carry the companies nobody
+   *   wrote an encyclopedia article about, which is most of them, and are the
+   *   only sources here that are *about* companies rather than about subjects.
+   *   Between them they decide which real company the rep meant. Each is off
+   *   until its key is set, and either one alone is enough.
    * - Wikidata matches the *name*, including every alias a company is filed
    *   under, so "zoho", "L&T" and "MSFT" resolve to the company itself. The
    *   article search cannot do this; it ranks by how much a page discusses the
@@ -458,7 +587,9 @@ class CompanyDataFetcher {
 
     console.log(`🔍 Searching for companies: ${term}`);
 
-    const [byName, byArticle] = await Promise.all([
+    const [fromLogoDev, fromBrandfetch, byName, byArticle] = await Promise.all([
+      logoDevFetcher.search(term),
+      brandfetchFetcher.search(term),
       firmographicsFetcher.suggest(term, 10).catch(error => {
         console.warn('⚠️ Wikidata name search failed:', error.message);
         return [];
@@ -494,6 +625,7 @@ class CompanyDataFetcher {
         name: hit.label,
         snippet: hit.description,
         wikidataId: hit.id,
+        matchedText: hit.matchedText,
         source: 'Wikidata',
         rank: index,
       })
@@ -502,7 +634,18 @@ class CompanyDataFetcher {
       add({ ...hit, rank: byName.length + index })
     );
 
-    const results = (await this.describeCandidates(candidates, term)).slice(0, 6);
+    // One list, logo.dev first where both indexes answer - they overlap
+    // heavily, and the first to name a domain keeps it
+    const brands = [...fromLogoDev, ...fromBrandfetch];
+
+    const described = await this.describeCandidates(candidates, term);
+
+    // Generous, because the brand indexes routinely return five or more real
+    // companies sharing a name and the list scrolls. Nothing the brand index
+    // returned is cut before this point.
+    const results = this.mergeBrands(described, brands, term)
+      .slice(0, 12)
+      .map(c => this.presentable(c));
 
     console.log(`✅ Found ${results.length} companies`);
     // A run where both searches were throttled is not an answer worth keeping
@@ -581,41 +724,19 @@ class CompanyDataFetcher {
         entities = await firmographicsFetcher.entities(ids, 'claims');
       } catch (error) {
         console.error('⚠️ Suggestion lookup failed:', error.message);
-        return candidates
-          .filter(c => this.mentions(c.name, term))
-          .map(c => this.presentable(c))
-          .slice(0, 6);
+        return candidates.filter(c => this.mentions(c.name, term)).slice(0, 6);
       }
     }
 
-    const described = candidates.map(candidate => {
-      const claims = entities[candidate.wikidataId]?.claims;
-      if (!claims) {
-        // An article Wikidata has nothing on is kept rather than guessed at -
-        // a small private prospect is likelier than a false positive
-        return { ...candidate, organisation: true, evidence: 0 };
-      }
+    const described = candidates.map(candidate =>
+      this.describeOne(candidate, entities[candidate.wikidataId]?.claims)
+    );
 
-      const website = firmographicsFetcher.best(claims.P856)?.mainsnak?.datavalue?.value;
-      const logo = firmographicsFetcher.best(claims[LOGO_PROPERTY])?.mainsnak?.datavalue?.value;
-      const ticker = this.usTicker(claims);
-
-      const domain = website ? this.hostname(website) : candidate.website;
-
-      return {
-        ...candidate,
-        website: domain,
-        // Commons is asked for a raster at roughly the size the row shows,
-        // since most logos are stored there as SVG. Wikidata names a logo for
-        // the large accounts and nothing for the rest, so a company that has a
-        // homepage but no logo item falls back to that site's own icon.
-        logoUrl: firmographicsFetcher.commonsImage(logo, 128) || this.faviconUrl(domain),
-        ticker: ticker || candidate.ticker,
-        excluded: this.isNeverAnAccount(claims) || this.isProduct(claims),
-        organisation: this.isOrganisation(claims),
-        evidence: ORGANISATION_CLAIMS.filter(property => claims[property]?.length).length,
-      };
-    });
+    // The companies the matches point at but that do not share the name: the
+    // maker behind a product ("snapchat" is an app, the account is Snap Inc.)
+    // and the parent and subsidiaries of the best match ("uber" should also
+    // offer the regional entities a rep actually sells into).
+    described.push(...await this.relatedCandidates(described, entities, term));
 
     const byScore = (a, b) => this.suggestionScore(b, term) - this.suggestionScore(a, term);
 
@@ -632,16 +753,300 @@ class CompanyDataFetcher {
 
     const companies = usable.filter(c => c.organisation).sort(byScore);
 
-    // Everything else Wikidata knows nothing about - which is most private
-    // prospects, and also every unrelated thing that happens to share the name.
-    // Enough are kept to answer for a company nobody has written up, but they
-    // never push a real match off the list.
-    const unknown = usable
-      .filter(c => !c.organisation)
-      .sort(byScore)
-      .slice(0, Math.max(0, 3 - companies.length));
+    // Items Wikidata knows nothing about are how a small private prospect gets
+    // found - but they are also the songs and usernames that share a brand's
+    // name, so they only appear when no real company answered the query, and
+    // are marked so a brand-search hit can displace them entirely.
+    const filler = companies.length
+      ? []
+      : usable
+          .filter(c => !c.organisation)
+          .sort(byScore)
+          .slice(0, 3)
+          .map(c => ({ ...c, filler: true }));
 
-    return [...companies, ...unknown].map(c => this.presentable(c));
+    return [...companies, ...filler];
+  }
+
+  /**
+   * The brand index answers first, in full, and in its own order.
+   *
+   * Every company it returns becomes a row. None of the filtering and ranking
+   * below applies to them, because none of it is needed: an index of companies
+   * asked for a company name has already answered the question, and each hit
+   * carries the domain and the mark that make the row usable. Ranking them
+   * against encyclopedia entries only ever moved the right answer down the list
+   * or off it - a search for "noon" lost noon.com itself that way.
+   *
+   * An entry the encyclopedias also found - same domain - is folded into its
+   * brand row rather than repeated, which is how the Wikidata id and ticker
+   * survive to make the enrichment exact once the account is added.
+   *
+   * What the encyclopedias found on their own follows, still filtered: that is
+   * where the museums, songs and gastropods come from.
+   */
+  mergeBrands(described, brands, term) {
+    // First writer wins: describeCandidates hands these over best-first, and
+    // more than one entity can name the same homepage - Wikidata carries two
+    // items for Microsoft, and the thinner of the two is not the one to fold
+    const byDomain = new Map();
+    for (const candidate of described) {
+      if (candidate.website && !byDomain.has(candidate.website)) {
+        byDomain.set(candidate.website, candidate);
+      }
+    }
+
+    const claimed = new Set();
+    const rows = [];
+
+    for (const brand of brands) {
+      // The two indexes overlap heavily; the first to name a domain keeps it
+      if (!brand.domain || claimed.has(brand.domain)) continue;
+      claimed.add(brand.domain);
+
+      const match = byDomain.get(brand.domain);
+
+      rows.push({
+        ...(match || {}),
+        // The brand index states the name the company trades under, which is
+        // the one a rep is looking for - Wikidata's label for the same company
+        // can be a lowercased slug or a legal form nobody says out loud
+        name: brand.name || match?.name,
+        website: brand.domain,
+        logoUrl:
+          brand.logoUrl ||
+          logoDevFetcher.imageUrl(brand.domain) ||
+          brandfetchFetcher.logoUrl(brand.domain) ||
+          match?.logoUrl,
+        logoFallbackUrl: match?.logoUrl,
+        source: 'brand-index',
+        organisation: true,
+      });
+    }
+
+    // One row per homepage. An encyclopedia entry for a domain a brand row
+    // already covers is the same company said twice, and a second entry for a
+    // domain another encyclopedia entry covers is usually a duplicate item.
+    const rest = [];
+    for (const candidate of described) {
+      if (candidate.website && claimed.has(candidate.website)) continue;
+      if (candidate.website) claimed.add(candidate.website);
+      // The "might be a company" filler exists to answer a query nothing else
+      // could. Once the brand index has answered, it is only noise.
+      if (rows.length && candidate.filler) continue;
+      rest.push(candidate);
+    }
+
+    return [...rows, ...this.branded(this.answersFirst(rest, term))];
+  }
+
+  /**
+   * Every suggestion arrives with a homepage and a mark, or it does not arrive.
+   *
+   * The domain is what tells HDFC Bank from HDFC Life and the logo is what a
+   * person recognises before they have read either name, so a row missing
+   * them cannot be picked with any confidence - and a row that cannot be picked
+   * with confidence is what produces a report about the wrong company.
+   *
+   * Both brand CDNs render a mark for any domain, so either leads once its key
+   * is set. The next source in the chain becomes the fallback the browser tries
+   * when the first turns out to have nothing for that domain - no single index
+   * covers every company, and a row with a broken image is worse than a row
+   * with the plainer of two logos.
+   */
+  branded(candidates) {
+    return candidates
+      .filter(candidate => candidate.website)
+      .map(candidate => {
+        const chain = [
+          // A mark the brand index handed back addresses the exact record that
+          // matched, so it leads the URLs built from the domain below
+          candidate.source === 'brand-index' ? candidate.logoUrl : undefined,
+          logoDevFetcher.imageUrl(candidate.website),
+          brandfetchFetcher.logoUrl(candidate.website),
+          candidate.logoUrl,
+        ].filter(Boolean);
+
+        if (!chain.length) return candidate;
+
+        return { ...candidate, logoUrl: chain[0], logoFallbackUrl: chain[1] };
+      });
+  }
+
+  /**
+   * Suggestions that actually answer the query, then whatever is left to fill
+   * the list out.
+   *
+   * Wikidata's name search matches loosely, so a query it has nothing good for
+   * comes back with items that match nothing at all - "acme" returns the
+   * University of Milan. They are real organisations with real homepages, so
+   * every filter up to here keeps them; the only thing wrong with them is that
+   * nobody typing "acme" meant them.
+   */
+  answersFirst(candidates, term) {
+    const answers = candidates.filter(c => this.answersQuery(c, term));
+    if (answers.length >= 3) return answers;
+
+    const rest = candidates.filter(c => !this.answersQuery(c, term));
+    return [...answers, ...rest.slice(0, 3 - answers.length)];
+  }
+
+  /** Whether two names read as the same brand - "Snap" and "Snapchat" do. */
+  sameBrandFamily(a, b) {
+    const first = name => this.brandKey(name).split(' ')[0] || '';
+    const one = first(a);
+    const other = first(b);
+    if (one.length < 3 || other.length < 3) return false;
+
+    return one.startsWith(other) || other.startsWith(one);
+  }
+
+  /** Whether a suggestion is a plausible reading of what was typed. */
+  answersQuery(candidate, term) {
+    return Boolean(
+      // A brand index only carries companies, and only returned this one
+      // because it matched
+      candidate.source === 'brand-index' ||
+      // The parent or subsidiary of something that did match
+      candidate.related ||
+      this.mentions(candidate.name, term) ||
+      // "L&T" matches Larsen & Toubro through an alias, not through its label
+      this.mentions(candidate.matchedText, term)
+    );
+  }
+
+  /**
+   * A company name reduced to what makes it the same company.
+   *
+   * The brand index says "Snap", Wikidata says "Snap Inc." and Wikipedia says
+   * "Snap, Inc." - all one account, and offering it three times is worse than
+   * offering it once.
+   */
+  brandKey(name) {
+    return String(name || '')
+      .toLowerCase()
+      .replace(/[.,''&]/g, '')
+      .replace(
+        /\b(inc|incorporated|corp|corporation|co|company|ltd|limited|llc|llp|plc|sa|nv|ag|gmbh|oy|ab|as|bv|pte|pvt|private)\b/g,
+        ''
+      )
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /** Whether a logo URL is a site icon standing in for a real mark. */
+  isFavicon(url) {
+    return /s2\/favicons|favicon/i.test(String(url || ''));
+  }
+
+  /** One candidate turned into a scored, displayable suggestion. */
+  describeOne(candidate, claims) {
+    if (!claims) {
+      // An article Wikidata has nothing on is kept rather than guessed at -
+      // a small private prospect is likelier than a false positive
+      return { ...candidate, organisation: true, evidence: 0 };
+    }
+
+    const website = firmographicsFetcher.best(claims.P856)?.mainsnak?.datavalue?.value;
+    const logo = firmographicsFetcher.best(claims[LOGO_PROPERTY])?.mainsnak?.datavalue?.value;
+    const ticker = this.usTicker(claims);
+
+    const domain = website ? this.hostname(website) : candidate.website;
+
+    return {
+      ...candidate,
+      website: domain,
+      // Commons is asked for a raster at roughly the size the row shows,
+      // since most logos are stored there as SVG. Wikidata names a logo for
+      // the large accounts and nothing for the rest, so a company that has a
+      // homepage but no logo item falls back to that site's own icon.
+      logoUrl: firmographicsFetcher.commonsImage(logo, 128) || this.faviconUrl(domain),
+      ticker: ticker || candidate.ticker,
+      excluded: this.isNeverAnAccount(claims) || this.isProduct(claims),
+      organisation: this.isOrganisation(claims),
+      evidence: ORGANISATION_CLAIMS.filter(property => claims[property]?.length).length,
+    };
+  }
+
+  /**
+   * Companies connected to the matches: makers of the products the name
+   * resolved to, and the family of the best company match.
+   *
+   * One extra batched call, and only when the first pass actually surfaced a
+   * connection worth following. Swallows its own failure - the relatives are an
+   * improvement on the list, never the reason there is no list.
+   */
+  async relatedCandidates(described, entities, term) {
+    const have = new Set(described.map(c => c.wikidataId).filter(Boolean));
+    const wanted = [];
+    const relations = new Map();
+    const want = (id, relation, madeBy) => {
+      if (!id || have.has(id)) return;
+      if (!relations.has(id)) relations.set(id, { relation, madeBy });
+      if (!wanted.includes(id)) wanted.push(id);
+    };
+
+    const byScore = (a, b) => this.suggestionScore(b, term) - this.suggestionScore(a, term);
+
+    // The company behind each product the typed name matched. Only products
+    // actually *named* what was typed count - an article that merely discusses
+    // the term would otherwise donate its maker, which is how a search for
+    // "snapchat" once offered Meta (via the Instagram article) above Snap Inc.
+    for (const candidate of described) {
+      const claims = entities[candidate.wikidataId]?.claims;
+      if (!claims || !candidate.excluded) continue;
+      if (!this.mentions(candidate.name, term)) continue;
+      for (const property of MAKER_CLAIMS) {
+        want(
+          firmographicsFetcher.itemId(firmographicsFetcher.best(claims[property])),
+          'maker',
+          candidate.name
+        );
+      }
+    }
+
+    // The parent and subsidiaries of the best real match
+    const anchor = described.filter(c => c.organisation && !c.excluded).sort(byScore)[0];
+    const anchorClaims = anchor && entities[anchor.wikidataId]?.claims;
+    if (anchorClaims) {
+      want(firmographicsFetcher.itemId(firmographicsFetcher.best(anchorClaims.P749)), 'family');
+      for (const claim of (anchorClaims.P355 || []).slice(0, 5)) {
+        want(firmographicsFetcher.itemId(claim), 'family');
+      }
+    }
+
+    if (!wanted.length) return [];
+
+    let relatives;
+    try {
+      relatives = await firmographicsFetcher.entities(wanted.slice(0, 8), 'labels|descriptions|claims');
+    } catch (error) {
+      console.warn('⚠️ Related-company lookup failed:', error.message);
+      return [];
+    }
+
+    return Object.values(relatives)
+      .filter(entity => entity?.claims && entity.labels?.en?.value)
+      .map((entity, index) => {
+        const { relation, madeBy } = relations.get(entity.id) || {};
+        const name = this.cleanName(entity.labels.en.value);
+
+        return this.describeOne(
+          {
+            name,
+            snippet: entity.descriptions?.en?.value,
+            wikidataId: entity.id,
+            source: 'Wikidata',
+            // A maker is only the account the rep meant when it is recognisably
+            // the same brand: Snap Inc. makes Snapchat, and that is the whole
+            // point of following the claim. The University of Milan also
+            // "makes" something called ACME, and that is not a sales lead.
+            related: relation === 'family' || this.sameBrandFamily(name, madeBy),
+            rank: 20 + index,
+          },
+          entity.claims
+        );
+      });
   }
 
   /**
@@ -703,6 +1108,9 @@ class CompanyDataFetcher {
     score += Math.min(candidate.evidence || 0, 8) * 4;
     // A homepage is the strongest sign the item is a going concern
     if (candidate.website) score += 6;
+    // Belonging to the matched company's family is worth more than sharing a
+    // syllable with the query - it is what the person is actually looking at
+    if (candidate.related) score += 20;
     // Ties fall back to the order the two searches returned
     score -= candidate.rank || 0;
 
@@ -710,20 +1118,34 @@ class CompanyDataFetcher {
   }
 
   /** Strip the fields that only mattered while ranking. */
-  presentable({ excluded, organisation, evidence, rank, ...candidate }) {
+  presentable({ excluded, organisation, evidence, rank, related, filler, matchedText, ...candidate }) {
     return candidate;
+  }
+
+  /** Whether an item states something only an incorporated company has. */
+  isIncorporated(claims) {
+    return CORPORATE_CLAIMS.some(property => claims[property]?.length);
   }
 
   /** Whether a Wikidata item is something that can never be an account. */
   isNeverAnAccount(claims) {
-    return (claims.P31 || [])
+    const instanceOf = (claims.P31 || [])
       .map(claim => claim.mainsnak?.datavalue?.value?.id)
-      .filter(Boolean)
-      .some(id => NEVER_AN_ACCOUNT.has(id));
+      .filter(Boolean);
+
+    if (instanceOf.some(id => NEVER_AN_ACCOUNT.has(id))) return true;
+
+    // "Instance of software" excludes - except on the conflated items, where
+    // the same entity also files revenue or a CEO and *is* the company
+    return instanceOf.some(id => WORK_CLASSES.has(id)) && !this.isIncorporated(claims);
   }
 
   /** Whether a Wikidata item is a work rather than the company behind it. */
   isProduct(claims) {
+    // Revenue, headcount, a CEO or a legal form settles it as a company
+    // whatever else the item states - see CORPORATE_CLAIMS
+    if (this.isIncorporated(claims)) return false;
+
     if (DECISIVE_PRODUCT_CLAIMS.some(property => claims[property]?.length)) return true;
 
     // Past those, a company that publishes is stated the other way round (P123

@@ -6,6 +6,8 @@ const { authenticate } = require('../middleware/auth');
 const newsDataFetcher = require('../services/dataFetchers/newsDataFetcher');
 const financialDataFetcher = require('../services/dataFetchers/financialDataFetcher');
 const companyDataFetcher = require('../services/dataFetchers/companyDataFetcher');
+const logoDevFetcher = require('../services/dataFetchers/logoDevFetcher');
+const brandfetchFetcher = require('../services/dataFetchers/brandfetchFetcher');
 const jobDataFetcher = require('../services/dataFetchers/jobDataFetcher');
 const aiEngine = require('../services/aiEngine');
 const reportService = require('../services/reportService');
@@ -89,35 +91,61 @@ router.get('/search', authenticate, async (req, res) => {
     const wikiResults = await companyDataFetcher.searchCompanies(q);
 
     const allResults = [
-      ...dbResults.map(c => ({
-        _id: c._id,
-        name: c.name,
-        ticker: c.ticker,
-        industry: c.industry,
-        // Shown as a domain so a saved account reads the same as a suggestion
-        website: companyDataFetcher.hostname(c.website),
-        logoUrl: c.logoUrl || companyDataFetcher.faviconUrl(companyDataFetcher.hostname(c.website)),
-        wikidataId: c.wikidataId,
-        source: 'local',
-      })),
+      // An account already on the list is shown whatever we know about it -
+      // dropping the rep's own saved company for want of a homepage would be
+      // worse than showing it without one
+      ...dbResults.map(c => {
+        const domain = companyDataFetcher.hostname(c.website);
+
+        return {
+          _id: c._id,
+          name: c.name,
+          ticker: c.ticker,
+          industry: c.industry,
+          // Shown as a domain so a saved account reads the same as a suggestion
+          website: domain,
+          logoUrl:
+            logoDevFetcher.imageUrl(domain) ||
+            brandfetchFetcher.logoUrl(domain) ||
+            c.logoUrl ||
+            companyDataFetcher.faviconUrl(domain),
+          logoFallbackUrl: c.logoUrl,
+          wikidataId: c.wikidataId,
+          source: 'local',
+        };
+      }),
       ...wikiResults.map(w => ({
         name: w.name,
         source: w.source,
-        snippet: w.snippet,
         website: w.website,
         logoUrl: w.logoUrl,
+        logoFallbackUrl: w.logoFallbackUrl,
         ticker: w.ticker,
-        // Carried back on "add" so the account is enriched from the entity the
-        // rep actually picked, not from a fresh search for its name
+        // Carried back on "add" so the account is enriched from the entity and
+        // homepage the rep actually picked, not from a fresh search for its name
         wikidataId: w.wikidataId,
       })),
     ];
 
-    // Local hits are inserted first, so keeping the first occurrence of each
-    // name preserves the richer record
-    const uniqueResults = Array.from(
-      new Map(allResults.map(r => [r.name, r])).values()
-    );
+    // Deduped on the homepage, and on the name only for a record that has no
+    // homepage to be told apart by.
+    //
+    // Keying on the name alone is what made a search for "noon" return three
+    // rows where the brand index had five: noon.com, noon.ai and noonclo.com
+    // are three unrelated companies that happen to share a name, and folding
+    // them together dropped noon.com - the one the rep was looking for.
+    //
+    // First occurrence wins, which is why local hits are listed first: a saved
+    // account carries an _id and a note, and the same company found online does
+    // not. `new Map(entries)` keeps the *last* value for a repeated key, so the
+    // insert is guarded rather than done in bulk.
+    const seen = new Map();
+    for (const result of allResults) {
+      const key = result.website || `name:${String(result.name || '').toLowerCase()}`;
+      if (!seen.has(key)) seen.set(key, result);
+    }
+
+    const uniqueResults = Array.from(seen.values());
 
     res.json(uniqueResults);
   } catch (error) {
@@ -132,7 +160,7 @@ router.get('/search', authenticate, async (req, res) => {
 // caller opts out.
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { name, ticker, notes, wikidataId, generateReport = true } = req.body;
+    const { name, ticker, notes, wikidataId, website, generateReport = true } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Company name required' });
@@ -143,10 +171,13 @@ router.post('/', authenticate, async (req, res) => {
     if (!company) {
       console.log(`📊 Fetching data for new company: ${name}`);
 
-      // The suggestion the rep picked names the exact entity, so enrichment
-      // skips the name search that used to decide between the four companies
-      // called HDFC on its own
-      const companyInfo = await companyDataFetcher.fetchCompanyInfo(name, ticker, { wikidataId });
+      // The suggestion the rep picked names the exact entity and homepage, so
+      // enrichment skips the name search that used to decide between the four
+      // companies called HDFC on its own
+      const companyInfo = await companyDataFetcher.fetchCompanyInfo(name, ticker, {
+        wikidataId,
+        domain: website,
+      });
       const financialData = ticker ? await financialDataFetcher.fetchFinancialData(ticker) : {};
       const { stock, financials } = splitFinancialPayload(financialData);
 

@@ -75,6 +75,20 @@ services:
       - key: FINNHUB_API_KEY
         sync: false
 
+      # Company suggestions in "Add an account". Leave blank and the search box
+      # falls back to Wikipedia/Wikidata alone.
+      - key: LOGODEV_SECRET_KEY
+        sync: false
+      - key: LOGODEV_PUBLISHABLE_KEY
+        sync: false
+
+      # Company suggestions plus firmographics for the private accounts
+      # Wikidata has no record of.
+      - key: BRANDFETCH_CLIENT_ID
+        sync: false
+      - key: BRANDFETCH_API_KEY
+        sync: false
+
       # Optional SQL store. Leave blank and the app boots with it disabled.
       - key: SUPABASE_URL
         sync: false
