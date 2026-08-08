@@ -490,7 +490,7 @@ export function TagInput({
     <div>
       <div
         onClick={() => inputRef.current?.focus()}
-        className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-surface px-2.5 py-2 shadow-inset transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 hover:border-slate-300"
+        className="flex max-h-40 min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-surface px-2.5 py-2 shadow-inset transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 hover:border-slate-300"
       >
         {value.map((tag, i) => (
           <span

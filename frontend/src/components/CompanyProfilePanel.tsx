@@ -455,12 +455,14 @@ function LongField({
 function ListCard({
   title,
   description,
+  count,
   onAdd,
   canEdit,
   children,
 }: {
   title: string;
   description: string;
+  count?: number;
   onAdd: () => void;
   canEdit: boolean;
   children: React.ReactNode;
@@ -469,7 +471,14 @@ function ListCard({
     <Card>
       <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-5">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-ink">{title}</h2>
+          <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight text-ink">
+            {title}
+            {typeof count === 'number' && count > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink-muted">
+                {count}
+              </span>
+            )}
+          </h2>
           <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-muted">{description}</p>
         </div>
         {canEdit && (
@@ -484,7 +493,11 @@ function ListCard({
           </button>
         )}
       </div>
-      <div className="divide-y divide-slate-100 border-t border-slate-100">{children}</div>
+      {/* The list scrolls inside the card past ~7 rows, so a long list never
+          pushes the sections below it off the bottom of the page */}
+      <div className="max-h-[22rem] overflow-y-auto overscroll-contain border-t border-slate-100">
+        <div className="divide-y divide-slate-100">{children}</div>
+      </div>
     </Card>
   );
 }
@@ -605,7 +618,13 @@ function TitleRulesCard({
   );
 
   return (
-    <ListCard title={title} description={description} onAdd={startAdd} canEdit={canEdit}>
+    <ListCard
+      title={title}
+      description={description}
+      count={items.length}
+      onAdd={startAdd}
+      canEdit={canEdit}
+    >
       {items.length === 0 && editing !== 'new' && (
         <EmptyRow>Nothing here yet — use the + button to add your first job title.</EmptyRow>
       )}
@@ -749,6 +768,7 @@ function TopicsCard({
     <ListCard
       title="Topics you care about"
       description="What should we watch for in the news? Add broad themes or specific things like competitor names and industry jargon. Mark the ones that matter most as a top priority and every report will lead with them."
+      count={items.length}
       onAdd={startAdd}
       canEdit={canEdit}
     >
@@ -828,14 +848,22 @@ function TechnologiesCard({
 
   return (
     <Card className="card-pad">
-      <h2 className="text-lg font-bold tracking-tight text-ink">Tools and technology you care about</h2>
+      <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight text-ink">
+        Tools and technology you care about
+        {value.length > 0 && (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink-muted">
+            {value.length}
+          </span>
+        )}
+      </h2>
       <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-muted">
         Which tools do you want to know about when a company uses them? Pick from the list or type
         your own — product names, competitors and acronyms all work.
       </p>
 
       {value.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
+        // Chips scroll inside a capped strip rather than growing the card
+        <div className="mt-4 flex max-h-52 flex-wrap gap-2 overflow-y-auto overscroll-contain pr-1">
           {value.map((tech) => (
             <span
               key={tech}
