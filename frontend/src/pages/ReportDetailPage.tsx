@@ -22,6 +22,7 @@ import {
   Users,
 } from 'lucide-react';
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
+import { usePoll } from '../lib/usePoll';
 import { Alert, Button, Card, ProgressBar, ScoreRing, Spinner, cx } from '../components/ui';
 import AskAnything from '../components/AskAnything';
 import {
@@ -139,8 +140,12 @@ export default function ReportDetailPage() {
         if (!silent) setLoading(true);
         const res = await reportsAPI.getReport(id);
         setReport(res.data);
+        setError('');
       } catch (err) {
-        setError(apiError(err, 'Could not load this report'));
+        // A failed background poll is not worth a banner when the report is
+        // already on screen - the next attempt will almost certainly land, and
+        // an error over a perfectly readable report is just noise.
+        if (!silent) setError(apiError(err, 'Could not load this report'));
       } finally {
         setLoading(false);
       }
@@ -153,12 +158,8 @@ export default function ReportDetailPage() {
   }, [load]);
 
   // Landing here straight after "Add account" means the report is still being
-  // written, so keep polling until the pipeline finishes.
-  useEffect(() => {
-    if (report?.status !== 'pending') return;
-    const timer = setInterval(() => load(true), 4000);
-    return () => clearInterval(timer);
-  }, [report?.status, load]);
+  // written, so keep checking until the pipeline finishes.
+  usePoll(() => load(true), { active: report?.status === 'pending' });
 
   // Keeps the jump bar showing where you are on what is now a long page.
   useEffect(() => {
@@ -250,45 +251,35 @@ export default function ReportDetailPage() {
 
   // Follow the replacement until it lands. Nothing here touches `report`, so
   // what the reader is looking at cannot change underneath them mid-sentence.
-  useEffect(() => {
-    const pendingId = regen?.id;
+  const pendingId = regen?.id ?? null;
+
+  const checkReplacement = useCallback(async () => {
     if (!pendingId) return;
 
-    let cancelled = false;
+    try {
+      const res = await reportsAPI.getReport(pendingId);
+      const next = res.data;
 
-    const check = async () => {
-      try {
-        const res = await reportsAPI.getReport(pendingId);
-        if (cancelled) return;
-
-        const next = res.data;
-        if (next.status === 'complete') {
-          navigate(`/reports/${next._id}`);
-        } else if (next.status === 'failed') {
-          setRegen(null);
-          setError(
-            next.error ||
-              'The new report did not finish. The one you were reading is unchanged.'
-          );
-        } else {
-          setRegen(current =>
-            current && current.id === pendingId
-              ? { ...current, step: next.progress?.step, percent: next.progress?.percent }
-              : current
-          );
-        }
-      } catch (_) {
-        // A dropped poll is not worth a banner - the next one will land
+      if (next.status === 'complete') {
+        navigate(`/reports/${next._id}`);
+      } else if (next.status === 'failed') {
+        setRegen(null);
+        setError(
+          next.error || 'The new report did not finish. The one you were reading is unchanged.'
+        );
+      } else {
+        setRegen(current =>
+          current && current.id === pendingId
+            ? { ...current, step: next.progress?.step, percent: next.progress?.percent }
+            : current
+        );
       }
-    };
+    } catch (_) {
+      // A dropped poll is not worth a banner - the next one will land
+    }
+  }, [pendingId, navigate]);
 
-    check();
-    const timer = setInterval(check, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [regen?.id, navigate]);
+  usePoll(checkReplacement, { active: Boolean(pendingId) });
 
   // Navigating to the finished report keeps this component mounted, so the
   // "writing a new one" state has to be dropped when the id under it changes.

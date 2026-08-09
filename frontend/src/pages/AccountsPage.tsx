@@ -24,6 +24,7 @@ import {
 import { useAuthStore, focusTopics } from '../store/authStore';
 import AddAccountModal from '../components/AddAccountModal';
 import AccountSettingsModal from '../components/AccountSettingsModal';
+import { usePoll } from '../lib/usePoll';
 import {
   Alert,
   Badge,
@@ -114,7 +115,8 @@ export default function AccountsPage() {
         setAccounts(res.data);
         setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
       } catch (err) {
-        setMessage({ tone: 'error', text: apiError(err, 'Could not load accounts') });
+        // Background polls fail quietly - see ReportsPage for the reasoning
+        if (!silent) setMessage({ tone: 'error', text: apiError(err, 'Could not load accounts') });
       } finally {
         setLoading(false);
       }
@@ -127,13 +129,9 @@ export default function AccountsPage() {
     load();
   }, [load]);
 
-  // Reports generate in the background, so poll while any are still running
+  // Reports generate in the background, so keep checking while any are running
   const hasPending = accounts.some((a) => a.latestReport?.status === 'pending');
-  useEffect(() => {
-    if (!hasPending) return;
-    const timer = setInterval(() => load(true), 5000);
-    return () => clearInterval(timer);
-  }, [hasPending, load]);
+  usePoll(() => load(true), { active: hasPending });
 
   const refresh = async (account: Account) => {
     try {

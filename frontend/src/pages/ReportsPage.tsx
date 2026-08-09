@@ -17,6 +17,7 @@ import {
 import { apiError, companiesAPI, downloadReportPdf, reportsAPI } from '../services/api';
 import AddAccountModal from '../components/AddAccountModal';
 import AccountSettingsModal from '../components/AccountSettingsModal';
+import { usePoll } from '../lib/usePoll';
 import {
   Alert,
   Button,
@@ -102,7 +103,9 @@ export default function ReportsPage() {
         setReports(res.data);
         setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
       } catch (err) {
-        setMessage({ tone: 'error', text: apiError(err, 'Could not load reports') });
+        // Background polls fail quietly: the list on screen is still good, and
+        // a banner over it would be noise the next attempt clears anyway.
+        if (!silent) setMessage({ tone: 'error', text: apiError(err, 'Could not load reports') });
       } finally {
         setLoading(false);
       }
@@ -119,13 +122,9 @@ export default function ReportsPage() {
     loadOptions();
   }, [loadOptions]);
 
-  // Reports generate asynchronously, so poll while any are still pending
+  // Reports generate asynchronously, so keep checking while any are pending
   const hasPending = reports.some((r) => r.status === 'pending');
-  useEffect(() => {
-    if (!hasPending) return;
-    const timer = setInterval(() => load(true), 5000);
-    return () => clearInterval(timer);
-  }, [hasPending, load]);
+  usePoll(() => load(true), { active: hasPending });
 
   const filtersActive = Boolean(query.trim()) || authorId !== 'all' || industry !== 'all';
 

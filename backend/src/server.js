@@ -149,11 +149,27 @@ const reportAskLimiter = limiter(
   'That is a lot of questions in one hour. Give it a few minutes.'
 );
 
-// Both hang off /api/reports, so the path picks which budget applies.
-const reportTraffic = (req, res, next) =>
-  /^\/[^/]+\/ask\/?$/.test(req.path)
+// Which budget a call to /api/reports draws on - or none at all.
+//
+// Only writing costs anything: generating a report spends real money at the AI
+// providers, and asking one a question spends a little. Reading costs nothing,
+// so reads are not counted here at all and fall to the global per-IP limiter
+// like every other GET in the API.
+//
+// This used to apply the generation budget to the whole router, which meant
+// opening a report, listing them, or downloading a PDF each burned one of the
+// forty writes allowed per hour. The pages poll every few seconds while a
+// report is being written, so a single pending report exhausted the budget in
+// about three minutes and then locked the tenant out of *reading* anything for
+// the rest of the hour - reported as "report generation limit reached" on a
+// page that was only trying to display a report that already existed.
+const reportTraffic = (req, res, next) => {
+  if (req.method !== 'POST') return next();
+
+  return /^\/[^/]+\/ask\/?$/.test(req.path)
     ? reportAskLimiter(req, res, next)
     : reportLimiter(req, res, next);
+};
 
 // The public API is machine traffic: it is keyed per API key rather than per IP,
 // because several integrations behind one NAT would otherwise share a budget,
