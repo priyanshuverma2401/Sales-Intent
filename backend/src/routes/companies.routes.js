@@ -1,7 +1,11 @@
+const fs = require('fs');
 const express = require('express');
 const Company = require('../models/Company');
 const User = require('../models/User');
-const { authenticate } = require('../middleware/auth');
+const Report = require('../models/Report');
+const Signal = require('../models/Signal');
+const Alert = require('../models/Alert');
+const { authenticate, isManager } = require('../middleware/auth');
 const companyDataFetcher = require('../services/dataFetchers/companyDataFetcher');
 const financialDataFetcher = require('../services/dataFetchers/financialDataFetcher');
 const accountTagging = require('../services/accountTagging');
@@ -46,6 +50,143 @@ function escapeRegex(value) {
 
 // News classification now lives in signalService, alongside the extraction and
 // filing it feeds - see signalService.classifySignal.
+
+// ---------------------------------------------------------------------------
+// Identifying a company that is already on the books
+//
+// One prospect must never end up as two accounts. Exact-name matching was not
+// enough for that: "LTIMindtree", "LTIMindtree Limited" and "LTM Limited" are
+// the same company typed three ways, and each produced its own row, its own
+// reports and its own signal history.
+// ---------------------------------------------------------------------------
+
+// Dropped when comparing names. None of these distinguishes one company from
+// another - they are how a company is incorporated, not who it is.
+const LEGAL_SUFFIXES =
+  /\b(limited|ltd|llc|inc|incorporated|corp|corporation|plc|sa|nv|ag|gmbh|pvt|private|co|company|holdings|group)\b/g;
+
+function normalizeName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[.,&'’]/g, ' ')
+    .replace(LEGAL_SUFFIXES, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hostOf(url) {
+  return String(url || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0];
+}
+
+/**
+ * The company this request is about, if the workspace already holds it.
+ *
+ * Tried in order of how certain each identifier is: the Wikidata entity names
+ * exactly one company in the world, a homepage names one business, and a name
+ * is only a guess until it is stripped of its legal suffix.
+ */
+async function findExistingCompany({ name, wikidataId, website }) {
+  if (wikidataId) {
+    const byEntity = await Company.findOne({ wikidataId });
+    if (byEntity) return byEntity;
+  }
+
+  const typed = String(name || '').trim();
+  if (typed) {
+    const byName = await Company.findOne({ name: new RegExp(`^${escapeRegex(typed)}$`, 'i') });
+    if (byName) return byName;
+  }
+
+  const host = hostOf(website);
+  if (host) {
+    const bySite = await Company.findOne({
+      website: new RegExp(`^https?://(www\\.)?${escapeRegex(host)}(/|$|\\?)`, 'i'),
+    });
+    if (bySite) return bySite;
+  }
+
+  // Same company, different legal suffix. Narrowed to names starting with the
+  // same first word so this stays a prefix scan rather than a full sweep, and
+  // the actual decision is made on the normalised forms.
+  const bare = normalizeName(typed);
+  const [firstWord] = bare.split(' ');
+  if (!firstWord || firstWord.length < 3) return null;
+
+  const candidates = await Company.find({ name: new RegExp(`^${escapeRegex(firstWord)}`, 'i') })
+    .limit(25);
+
+  return candidates.find(c => normalizeName(c.name) === bare) || null;
+}
+
+/**
+ * Pull fresh news, signals, firmographics and market data onto a company.
+ *
+ * Shared by the Refresh button and by re-adding an account that is already
+ * tracked, so both produce exactly what the nightly sweep would have - one
+ * behaviour, not two implementations that can drift apart.
+ */
+async function refreshCompanyData(company, organization) {
+  console.log(`🔄 Refreshing data for ${company.name}`);
+
+  // Bias the refresh toward the topics the tenant monitors, high priority
+  // first, so the signals that appear are the ones worth acting on
+  const seller = organization?.toSellerContext?.() || {};
+  const keywords = [
+    ...(seller.priorityTopics || []),
+    ...(seller.standardTopics || []),
+  ].filter(Boolean);
+
+  const result = await signalService.refreshCompany(company, keywords);
+  const { financial, jobs } = result;
+
+  const { stock, financials } = splitFinancialPayload(financial);
+
+  company.financials = { ...company.financials?.toObject?.() ?? company.financials, ...financials, lastUpdated: new Date() };
+  company.stock = { ...company.stock?.toObject?.() ?? company.stock, ...stock, lastUpdated: new Date() };
+
+  // Headcount, headquarters and revenue, for accounts stored before those
+  // were ever fetched. Saves the document itself when it fills anything in.
+  // force: pressing Refresh is an explicit request to look again, so it skips
+  // the cooldown that keeps report generation from re-querying a known miss
+  await companyDataFetcher.backfill(company, { force: true }).catch(e =>
+    console.warn(`⚠️ Firmographics backfill skipped: ${e.message}`)
+  );
+
+  // Backfill descriptive fields that were missing. Enrichment only ran when a
+  // company was first added, so anything absent then stayed blank forever.
+  if (!company.industry && financial.industry) company.industry = financial.industry;
+  if (!company.website && financial.website) company.website = financial.website;
+  // Finnhub states a logo, so it also replaces an article lead image left
+  // behind when Wikidata had no logo of its own to offer
+  if (financial.logo && (!company.logoUrl || companyDataFetcher.isArticleImage(company.logoUrl))) {
+    company.logoUrl = financial.logo;
+  }
+  if ((!company.country || company.country === 'Unknown') && financial.country) {
+    company.country = financial.country;
+  }
+
+  if (!company.dataSources) company.dataSources = {};
+  company.dataSources.news = { lastFetched: new Date(), status: 'success' };
+  company.dataSources.jobs = {
+    lastFetched: new Date(),
+    status: jobs.openPositions?.length ? 'success' : 'empty',
+  };
+  company.updatedAt = new Date();
+  await company.save();
+
+  return {
+    newsFound: result.newsFound,
+    signalsCreated: result.created,
+    jobsFound: result.jobsFound,
+    patentsFound: result.patentsFound,
+    awardsFound: result.awardsFound,
+  };
+}
 
 // Search companies
 router.get('/search', authenticate, async (req, res) => {
@@ -143,7 +284,10 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Company name required' });
     }
 
-    let company = await Company.findOne({ name });
+    // One prospect, one account. Somebody adding a company a teammate already
+    // added is asking for a fresh look at it, not for a second copy of it.
+    let company = await findExistingCompany({ name, wikidataId, website });
+    const alreadyTracked = Boolean(company);
 
     if (!company) {
       console.log(`📊 Fetching data for new company: ${name}`);
@@ -198,6 +342,20 @@ router.post('/', authenticate, async (req, res) => {
 
       await company.save();
       console.log(`✅ Company saved: ${name}`);
+    } else {
+      // Re-adding is a request to look again. The crawl runs in the background
+      // rather than being awaited: it can take the best part of a minute, and
+      // holding the request open that long would read as a hung "Add" button.
+      //
+      // Nothing is written from stale data as a result - the report pipeline
+      // fetches its own news and filings regardless. What this catches up is
+      // the signals feed and the firmographics on the account itself.
+      const organization = req.organization;
+      setImmediate(() => {
+        refreshCompanyData(company, organization).catch(error =>
+          console.warn(`⚠️ Refresh on re-add failed for ${company.name}: ${error.message}`)
+        );
+      });
     }
 
     // Add to the user's account list, avoiding duplicates
@@ -238,11 +396,23 @@ router.post('/', authenticate, async (req, res) => {
       }
     }
 
-    res.status(201).json({
+    // Who first put this account on the books, so the client can say "already
+    // tracked by Ravi" rather than the unhelpful "that already exists".
+    const addedBy = alreadyTracked && company.addedBy
+      ? await User.findById(company.addedBy).select('firstName lastName email').lean()
+      : null;
+
+    res.status(alreadyTracked ? 200 : 201).json({
       company,
       reportId: report?._id || null,
       reportStatus: report ? 'pending' : null,
       reportError,
+      // The client needs to tell the two apart: adding a new account and
+      // refreshing one the team already has read very differently to a user.
+      alreadyTracked,
+      addedByName: addedBy
+        ? `${addedBy.firstName || ''} ${addedBy.lastName || ''}`.trim() || addedBy.email
+        : null,
     });
   } catch (error) {
     console.error('Add company error:', error);
@@ -278,21 +448,81 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Remove company from watchlist
+/**
+ * Remove an account from the whole workspace.
+ *
+ * Since one prospect is now one shared account rather than a copy per seat,
+ * removing it has to mean removing it for everyone - a delete that left the
+ * account on four other people's boards would not be a delete.
+ *
+ * Only the person who added it, or an owner/admin, may do that. Accounts added
+ * before `addedBy` was recorded belong to nobody, so anyone on the team may
+ * clear them rather than their being stuck on the board forever.
+ *
+ * The Company document itself survives: it is shared with every other tenant
+ * watching the same prospect, and none of them asked for it to go.
+ */
 router.delete('/:id', authenticate, async (req, res) => {
   try {
-    req.user.watchlist = (req.user.watchlist || []).filter(
-      w => w.companyId?.toString() !== req.params.id
-    );
-    await req.user.save();
+    const company = await Company.findById(req.params.id);
+    if (!company) return res.status(404).json({ error: 'Company not found' });
 
-    res.json({ message: 'Company removed from watchlist' });
+    const unattributed = !company.addedBy;
+    const mine = company.addedBy?.toString() === req.user._id.toString();
+
+    if (!mine && !unattributed && !isManager(req.user)) {
+      const adder = await User.findById(company.addedBy).select('firstName lastName email').lean();
+      const who = adder
+        ? `${adder.firstName || ''} ${adder.lastName || ''}`.trim() || adder.email
+        : 'whoever added it';
+
+      return res.status(403).json({
+        error: `${company.name} was added by ${who}. Only they, or an owner, can remove it for the team.`,
+      });
+    }
+
+    const orgId = req.organization?._id;
+    const memberIds = orgId
+      ? await User.distinct('_id', { organizationId: orgId })
+      : [req.user._id];
+
+    await User.updateMany(
+      { _id: { $in: memberIds } },
+      { $pull: { watchlist: { companyId: company._id } } }
+    );
+
+    // Each report owns a rendered PDF on disk, so the files go before the
+    // records that point at them - otherwise the directory grows forever.
+    const reports = await Report.find({
+      companyId: company._id,
+      $or: [{ organizationId: orgId }, { userId: { $in: memberIds } }],
+    }).select('pdfPath');
+
+    reports.forEach((report) => {
+      if (report.pdfPath && fs.existsSync(report.pdfPath)) fs.unlink(report.pdfPath, () => {});
+    });
+    await Report.deleteMany({ _id: { $in: reports.map(r => r._id) } });
+
+    // Only this tenant's own signals. Signals derived from public sources are
+    // shared with every other tenant watching the same company.
+    if (orgId) await Signal.deleteMany({ companyId: company._id, organizationId: orgId });
+
+    // An alert rule on an account nobody is watching would keep firing
+    await Alert.deleteMany({ companyId: company._id, userId: { $in: memberIds } });
+
+    res.json({
+      message: `${company.name} removed for the team`,
+      companyName: company.name,
+      reportsDeleted: reports.length,
+    });
   } catch (error) {
+    console.error('Remove account error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Refresh company data
+// Refresh company data. The work itself lives in refreshCompanyData, shared
+// with the re-add path so both produce the same result.
 router.post('/:id/refresh', authenticate, async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
@@ -301,65 +531,12 @@ router.post('/:id/refresh', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Company not found' });
     }
 
-    console.log(`🔄 Refreshing data for ${company.name}`);
-
-    // Bias the refresh toward the topics the tenant monitors, high priority
-    // first, so the signals that appear are the ones worth acting on
-    const seller = req.organization?.toSellerContext?.() || {};
-    const keywords = [
-      ...(seller.priorityTopics || []),
-      ...(seller.standardTopics || []),
-    ].filter(Boolean);
-
-    // The crawl, the extraction and the filing all live in signalService, so
-    // pressing Refresh produces exactly what the nightly sweep would have
-    // produced on its own - the button is a way to not wait, not a second
-    // implementation that can drift from the first.
-    const result = await signalService.refreshCompany(company, keywords);
-    const { financial, jobs } = result;
-
-    const { stock, financials } = splitFinancialPayload(financial);
-
-    company.financials = { ...company.financials?.toObject?.() ?? company.financials, ...financials, lastUpdated: new Date() };
-    company.stock = { ...company.stock?.toObject?.() ?? company.stock, ...stock, lastUpdated: new Date() };
-
-    // Headcount, headquarters and revenue, for accounts stored before those
-    // were ever fetched. Saves the document itself when it fills anything in.
-    // force: pressing Refresh is an explicit request to look again, so it skips
-    // the cooldown that keeps report generation from re-querying a known miss
-    await companyDataFetcher.backfill(company, { force: true }).catch(e =>
-      console.warn(`⚠️ Firmographics backfill skipped: ${e.message}`)
-    );
-
-    // Backfill descriptive fields that were missing. Enrichment only ran when a
-    // company was first added, so anything absent then stayed blank forever.
-    if (!company.industry && financial.industry) company.industry = financial.industry;
-    if (!company.website && financial.website) company.website = financial.website;
-    // Finnhub states a logo, so it also replaces an article lead image left
-    // behind when Wikidata had no logo of its own to offer
-    if (financial.logo && (!company.logoUrl || companyDataFetcher.isArticleImage(company.logoUrl))) {
-      company.logoUrl = financial.logo;
-    }
-    if ((!company.country || company.country === 'Unknown') && financial.country) {
-      company.country = financial.country;
-    }
-
-    if (!company.dataSources) company.dataSources = {};
-    company.dataSources.news = { lastFetched: new Date(), status: 'success' };
-    company.dataSources.jobs = {
-      lastFetched: new Date(),
-      status: jobs.openPositions?.length ? 'success' : 'empty',
-    };
-    company.updatedAt = new Date();
-    await company.save();
+    const result = await refreshCompanyData(company, req.organization);
 
     res.json({
       message: 'Data refreshed successfully',
-      newsFound: result.newsFound,
-      signalsCreated: result.created,
-      jobsFound: result.jobsFound,
-      patentsFound: result.patentsFound,
-      awardsFound: result.awardsFound,
+      companyName: company.name,
+      ...result,
     });
   } catch (error) {
     console.error('Refresh error:', error);

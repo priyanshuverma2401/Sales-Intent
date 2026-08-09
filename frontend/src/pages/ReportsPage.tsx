@@ -7,17 +7,21 @@ import {
   FileText,
   Layers,
   Loader2,
+  Newspaper,
   Plus,
   Search,
+  Settings2,
   Trash2,
   X,
 } from 'lucide-react';
-import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
+import { apiError, companiesAPI, downloadReportPdf, reportsAPI } from '../services/api';
 import AddAccountModal from '../components/AddAccountModal';
+import AccountSettingsModal from '../components/AccountSettingsModal';
 import {
   Alert,
   Button,
   EmptyState,
+  OverflowMenu,
   PageHeader,
   ProgressBar,
   ScoreRing,
@@ -53,6 +57,9 @@ export default function ReportsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  // The account whose crawl settings are open. Reports carry only the company
+  // id, so the record itself is fetched when the dialog is asked for.
+  const [settingsFor, setSettingsFor] = useState<{ _id: string; name: string } | null>(null);
 
   const [query, setQuery] = useState('');
   const [authorId, setAuthorId] = useState('all');
@@ -137,6 +144,38 @@ export default function ReportsPage() {
       );
     } catch (err) {
       setMessage({ tone: 'error', text: 'Download failed — the PDF may still be preparing.' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const checkForNews = async (report: ReportSummary) => {
+    try {
+      setBusyId(report._id);
+      const res = await companiesAPI.refreshData(report.companyId);
+      setMessage({
+        tone: 'success',
+        text: `${report.companyName}: found ${res.data.signalsCreated ?? 0} new updates across ${
+          res.data.newsFound ?? 0
+        } articles`,
+      });
+    } catch (err) {
+      setMessage({ tone: 'error', text: apiError(err, `Could not refresh ${report.companyName}`) });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // The settings dialog needs the pages and tags, which a report summary does
+  // not carry - so the company is read on demand rather than fattening every
+  // row in the list for a dialog most of them never open.
+  const openSettings = async (report: ReportSummary) => {
+    try {
+      setBusyId(report._id);
+      const res = await companiesAPI.getCompany(report.companyId);
+      setSettingsFor(res.data);
+    } catch (err) {
+      setMessage({ tone: 'error', text: apiError(err, 'Could not open the account settings') });
     } finally {
       setBusyId(null);
     }
@@ -377,35 +416,56 @@ export default function ReportsPage() {
 
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {done && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={Download}
-                          loading={busy}
-                          onClick={() => download(report)}
-                        >
-                          PDF
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => navigate(`/reports/${report._id}`)}
-                        >
-                          Open <ArrowRight size={13} />
-                        </Button>
-                      </>
-                    )}
-                    {report.status !== 'pending' && report.canDelete !== false && (
-                      <button
-                        onClick={() => remove(report)}
-                        disabled={busy}
-                        className="rounded-lg p-1.5 text-ink-faint transition hover:bg-red-50 hover:text-red-600"
-                        title={report.isMine ? 'Delete report' : 'Delete report (owner)'}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => navigate(`/reports/${report._id}`)}
                       >
-                        <Trash2 size={14} />
-                      </button>
+                        Open <ArrowRight size={13} />
+                      </Button>
                     )}
+
+                    {busy && <Loader2 size={14} className="animate-spin text-brand-500" />}
+
+                    <OverflowMenu
+                      label={`Actions for the ${report.companyName} report`}
+                      actions={[
+                        {
+                          label: 'Download PDF',
+                          icon: Download,
+                          hidden: !done,
+                          disabled: busy,
+                          onClick: () => download(report),
+                        },
+                        {
+                          // Same set as the account menu. Rewriting is not
+                          // here either - it belongs on the open report.
+                          label: 'Check for news',
+                          icon: Newspaper,
+                          disabled: busy,
+                          onClick: () => checkForNews(report),
+                        },
+                        {
+                          label: 'Account settings',
+                          icon: Settings2,
+                          disabled: busy,
+                          onClick: () => openSettings(report),
+                        },
+                        {
+                          label: 'Delete report',
+                          icon: Trash2,
+                          danger: true,
+                          // Whoever wrote it, or an owner/admin. The server
+                          // decides and enforces it; this only renders it.
+                          hidden: report.status === 'pending' || report.canDelete === false,
+                          disabled: busy,
+                          hint: report.isMine
+                            ? undefined
+                            : `Written by ${report.author?.name || 'a teammate'}`,
+                          onClick: () => remove(report),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -414,18 +474,35 @@ export default function ReportsPage() {
         </div>
       )}
 
+      <AccountSettingsModal
+        open={Boolean(settingsFor)}
+        account={settingsFor}
+        onClose={() => setSettingsFor(null)}
+        onSaved={() => {
+          setMessage({
+            tone: 'success',
+            text: `${settingsFor?.name} settings saved. They take effect on the next report or refresh.`,
+          });
+        }}
+      />
+
       <AddAccountModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAdded={({ companyName, reportId, reportError }) => {
+        onAdded={({ companyName, reportId, reportError, alreadyTracked, addedByName }) => {
           load(true);
           loadOptions();
+
+          const added = alreadyTracked
+            ? `${companyName} is already tracked${addedByName ? ` (added by ${addedByName})` : ''} — refreshing it`
+            : `${companyName} added`;
+
           if (reportError) {
-            setMessage({ tone: 'error', text: `${companyName} added, but: ${reportError.error}` });
+            setMessage({ tone: 'error', text: `${added}, but: ${reportError.error}` });
           } else if (reportId) {
             navigate(`/reports/${reportId}`);
           } else {
-            setMessage({ tone: 'success', text: `${companyName} added.` });
+            setMessage({ tone: 'success', text: `${added}.` });
           }
         }}
       />

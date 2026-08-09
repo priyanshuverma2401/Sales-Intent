@@ -8,7 +8,6 @@ import {
   FileText,
   Loader2,
   Plus,
-  Sparkles,
   Target,
   TrendingUp,
 } from 'lucide-react';
@@ -62,7 +61,7 @@ export default function DashboardPage() {
     load();
   }, []);
 
-  const { high: priorityTopics, rest: otherTopics, all: allTopics } = focusTopics(organization);
+  const { high: priorityTopics, all: allTopics } = focusTopics(organization);
   const incomplete = companyProfileIncomplete(organization);
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
   // Priority topics are what the report is argued around; without any, every
@@ -266,67 +265,6 @@ export default function DashboardPage() {
 
         {/* Right rail */}
         <div className="space-y-6">
-          {/* The company profile lens every report is written through */}
-          <Card className="card-pad">
-            <h3 className="eyebrow mb-4 flex items-center gap-1.5 text-brand-600">
-              <Sparkles size={13} /> What we look for
-            </h3>
-
-            <dl className="space-y-3.5 text-[13px]">
-              <div>
-                <dt className="font-semibold text-ink-faint">Top priorities</dt>
-                <dd className="mt-1.5 flex flex-wrap gap-1.5">
-                  {priorityTopics.length ? (
-                    priorityTopics.map((topic) => (
-                      <span
-                        key={topic}
-                        className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"
-                      >
-                        {topic}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-ink-faint">None chosen</span>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-semibold text-ink-faint">Also watching</dt>
-                <dd className="mt-1.5 flex flex-wrap gap-1.5">
-                  {otherTopics.length ? (
-                    otherTopics.map((topic) => (
-                      <span
-                        key={topic}
-                        className="rounded-md bg-brand-50 px-2 py-0.5 text-2xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200"
-                      >
-                        {topic}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-ink-faint">None</span>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-semibold text-ink-faint">What you sell</dt>
-                <dd className="mt-1 leading-relaxed text-ink-soft">
-                  {organization?.capabilities?.join(', ') || 'Not set yet'}
-                </dd>
-              </div>
-            </dl>
-
-            <Link
-              to="/settings"
-              className="group mt-5 inline-flex items-center gap-1.5 text-[13px] font-semibold text-brand-600 transition hover:text-brand-700"
-            >
-              {isAdmin ? 'Edit your business profile' : 'View your business profile'}
-              <ArrowRight
-                size={13}
-                className="transition-transform duration-200 group-hover:translate-x-0.5"
-              />
-            </Link>
-          </Card>
-
           {/* Recent reports */}
           <Card className="card-pad">
             <div className="mb-3 flex items-center justify-between">

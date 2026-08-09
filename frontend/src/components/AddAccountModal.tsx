@@ -81,7 +81,15 @@ export default function AddAccountModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onAdded: (result: { companyName: string; reportId?: string | null; reportError?: any }) => void;
+  // `alreadyTracked` is how the caller tells "we added this" apart from "the
+  // team already had this, so we refreshed it and are writing a fresh report".
+  onAdded: (result: {
+    companyName: string;
+    reportId?: string | null;
+    reportError?: any;
+    alreadyTracked?: boolean;
+    addedByName?: string | null;
+  }) => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -158,6 +166,8 @@ export default function AddAccountModal({
         companyName: res.data?.company?.name || name,
         reportId: res.data?.reportId,
         reportError: res.data?.reportError,
+        alreadyTracked: res.data?.alreadyTracked,
+        addedByName: res.data?.addedByName,
       });
       onClose();
     } catch (err) {

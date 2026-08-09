@@ -30,10 +30,24 @@ function sameLinks(a = [], b = []) {
   return flatten(a) === flatten(b);
 }
 
-// Deleting is the asymmetric one: an owner may remove anything in the tenant,
-// a member may only remove what they generated themselves.
-function canDelete(report, req) {
-  if (isAuthor(report, req)) return true;
+/**
+ * Who may delete a report.
+ *
+ * Governed by the account rather than by who pressed Generate: an account is
+ * one shared thing the whole team works now, and the person who put it on the
+ * board is the one answerable for what is filed against it. An owner or admin
+ * may remove anything in the tenant.
+ *
+ * `accountAddedBy` is the company's `addedBy`. Accounts stored before that was
+ * recorded belong to nobody, so on those the report's own author can still
+ * clear their work rather than nobody being able to.
+ */
+function canDelete(report, req, accountAddedBy) {
+  const me = req.user._id.toString();
+
+  if (accountAddedBy && accountAddedBy.toString() === me) return true;
+  if (!accountAddedBy && isAuthor(report, req)) return true;
+
   return isManager(req.user) && sameOrg(report, req);
 }
 
@@ -165,12 +179,22 @@ router.get('/', authenticate, async (req, res) => {
       .sort({ generatedAt: -1 })
       .limit(120);
 
-    const manages = isManager(req.user);
+    // Delete rights follow the account, so the page needs to know who added
+    // each one. Fetched in a single query rather than per row.
+    const companyIds = [...new Set(reports.map(r => r.companyId?.toString()).filter(Boolean))];
+    const companies = companyIds.length
+      ? await Company.find({ _id: { $in: companyIds } }).select('addedBy').lean()
+      : [];
+    const adderByCompany = new Map(
+      companies.map(c => [c._id.toString(), c.addedBy?.toString() || null])
+    );
+
     const me = req.user._id.toString();
 
     res.json(reports.map(report => {
       const author = report.userId;
       const mine = author?._id?.toString() === me;
+      const addedBy = adderByCompany.get(report.companyId?.toString()) || null;
 
       return {
         ...report.toObject(),
@@ -184,7 +208,7 @@ router.get('/', authenticate, async (req, res) => {
             }
           : null,
         isMine: mine,
-        canDelete: mine || manages,
+        canDelete: canDelete(report, req, addedBy),
       };
     }));
   } catch (error) {
@@ -330,12 +354,14 @@ router.delete('/:id', authenticate, async (req, res) => {
     const report = await Report.findById(req.params.id);
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
+    const company = await Company.findById(report.companyId).select('addedBy').lean();
+
     // Distinguish "not yours" from "does not exist": a member can see this
     // report in the list, so a 404 here would read as a bug rather than a rule.
-    if (!canDelete(report, req)) {
+    if (!canDelete(report, req, company?.addedBy)) {
       return res.status(403).json({
         error: canRead(report, req)
-          ? 'Only the person who generated this report, or an owner, can delete it'
+          ? 'Only the person who added this account, or an owner, can delete its reports'
           : 'Not authorized to delete this report',
       });
     }

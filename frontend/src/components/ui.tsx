@@ -1,5 +1,6 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
-import { AlertCircle, Check, Info, Loader2, X } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlertCircle, Check, Info, Loader2, MoreVertical, X } from 'lucide-react';
 
 // Shared primitives. Everything visual in the app is built from these so a
 // spacing or colour change happens in exactly one place.
@@ -327,6 +328,191 @@ export function ProgressBar({
         <div className="h-full w-1/4 animate-progress-sweep rounded-full bg-brand-gradient" />
       )}
     </div>
+  );
+}
+
+// --- Overflow menu ----------------------------------------------------------
+
+export interface MenuAction {
+  label: string;
+  icon?: React.ElementType;
+  onClick: () => void;
+  /** Renders in red and sits below a divider - destructive actions only. */
+  danger?: boolean;
+  disabled?: boolean;
+  /** Left out of the menu entirely. Cheaper at the call site than filtering. */
+  hidden?: boolean;
+  hint?: string;
+}
+
+const MENU_WIDTH = 224; // w-56
+const MENU_GAP = 8;
+
+/**
+ * A "…" button holding the actions that do not deserve permanent space.
+ *
+ * Rows used to stack every action as its own button, which set the height of
+ * the whole tile by the number of things you could do to it rather than by how
+ * much there was to read. One primary action stays out in the open; the rest
+ * live here.
+ *
+ * The panel is rendered into <body> rather than beside the button. Every card
+ * it is used on sets `overflow-hidden` - for the rounded progress strip along
+ * the bottom - and an absolutely positioned menu inside one is cropped at the
+ * card's edge. That silently hid the last items: a five-item menu on a short
+ * card showed three, so "Remove" simply was not there. A portal cannot be
+ * clipped by an ancestor, whatever that ancestor's overflow is set to.
+ */
+export function OverflowMenu({
+  actions,
+  label = 'More actions',
+  align = 'right',
+}: {
+  actions: MenuAction[];
+  label?: string;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
+
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const visible = actions.filter((a) => !a.hidden);
+  const normal = visible.filter((a) => !a.danger);
+  const destructive = visible.filter((a) => a.danger);
+
+  // Anchored to the trigger in viewport coordinates, so the panel tracks the
+  // button when the page behind it scrolls instead of drifting off it.
+  const place = useCallback(() => {
+    const box = buttonRef.current?.getBoundingClientRect();
+    if (!box) return;
+
+    // Enough to decide which way to open. The panel then sizes itself: an
+    // upward menu is pinned by its bottom edge, so its height is never guessed.
+    const estimated = visible.length * 40 + 24;
+    const dropUp = window.innerHeight - box.bottom < estimated && box.top > estimated;
+
+    const left =
+      align === 'right'
+        ? Math.max(MENU_GAP, box.right - MENU_WIDTH)
+        : Math.min(box.left, window.innerWidth - MENU_WIDTH - MENU_GAP);
+
+    setPosition(
+      dropUp
+        ? { bottom: window.innerHeight - box.top + MENU_GAP, left }
+        : { top: box.bottom + MENU_GAP, left }
+    );
+  }, [align, visible.length]);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    // The panel is not a descendant of the trigger any more, so an outside
+    // click has to clear both.
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+
+    // Capture phase: the page scrolls inside <main>, not on window, and a
+    // bubbling listener never sees that.
+    const onScroll = () => place();
+
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open, place]);
+
+  if (visible.length === 0) return null;
+
+  const renderItem = (action: MenuAction, i: number) => {
+    const Icon = action.icon;
+    return (
+      <button
+        key={`${action.label}-${i}`}
+        role="menuitem"
+        disabled={action.disabled}
+        title={action.hint}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(false);
+          action.onClick();
+        }}
+        className={cx(
+          'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition',
+          'disabled:cursor-not-allowed disabled:opacity-45',
+          action.danger
+            ? 'text-red-600 hover:bg-red-50'
+            : 'text-ink-soft hover:bg-slate-50 hover:text-ink'
+        )}
+      >
+        {Icon && <Icon size={15} className="shrink-0" />}
+        {action.label}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        className={cx(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all duration-200',
+          open
+            ? 'border-slate-300 bg-slate-100 text-ink'
+            : 'border-slate-200 bg-surface text-ink-muted hover:border-slate-300 hover:bg-slate-50 hover:text-ink'
+        )}
+      >
+        <MoreVertical size={16} />
+      </button>
+
+      {open &&
+        position &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+            style={{ top: position.top, bottom: position.bottom, left: position.left, width: MENU_WIDTH }}
+            className={cx(
+              'fixed z-[60] animate-scale-in rounded-2xl border border-slate-200 bg-surface p-1.5 shadow-pop',
+              position.bottom !== undefined ? 'origin-bottom' : 'origin-top'
+            )}
+          >
+            {normal.map(renderItem)}
+            {destructive.length > 0 && normal.length > 0 && (
+              <div className="my-1 h-px bg-slate-100" role="separator" />
+            )}
+            {destructive.map(renderItem)}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 

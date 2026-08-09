@@ -16,6 +16,7 @@ import {
   MapPin,
   Printer,
   RefreshCw,
+  Sparkles,
   TrendingUp,
   User,
   Users,
@@ -123,6 +124,9 @@ export default function ReportDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  // The replacement being written, while this one stays on screen. Null except
+  // between pressing "Write a new one" and the new report landing.
+  const [regen, setRegen] = useState<{ id: string; step?: string; percent?: number } | null>(null);
   const [activeChapter, setActiveChapter] = useState<string>(CHAPTERS[0].id);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [descriptionClamped, setDescriptionClamped] = useState(false);
@@ -222,6 +226,75 @@ export default function ReportDetailPage() {
 
     return links;
   }, [report]);
+
+  /**
+   * Write a new report on this account.
+   *
+   * Regenerating produces a new report rather than editing this one, so the
+   * page deliberately does not empty itself: a rep who pressed the button on
+   * the way into a call still needs what is on screen. The old report stays
+   * fully readable and is swapped for the new one only once it has finished.
+   */
+  const writeNewOne = async () => {
+    if (!report?.companyId) return;
+    setError('');
+
+    try {
+      const res = await reportsAPI.generate(report.companyId);
+      setRegen({ id: res.data.reportId, step: 'Getting started', percent: 4 });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setError(apiError(err, 'We could not start a new report'));
+    }
+  };
+
+  // Follow the replacement until it lands. Nothing here touches `report`, so
+  // what the reader is looking at cannot change underneath them mid-sentence.
+  useEffect(() => {
+    const pendingId = regen?.id;
+    if (!pendingId) return;
+
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await reportsAPI.getReport(pendingId);
+        if (cancelled) return;
+
+        const next = res.data;
+        if (next.status === 'complete') {
+          navigate(`/reports/${next._id}`);
+        } else if (next.status === 'failed') {
+          setRegen(null);
+          setError(
+            next.error ||
+              'The new report did not finish. The one you were reading is unchanged.'
+          );
+        } else {
+          setRegen(current =>
+            current && current.id === pendingId
+              ? { ...current, step: next.progress?.step, percent: next.progress?.percent }
+              : current
+          );
+        }
+      } catch (_) {
+        // A dropped poll is not worth a banner - the next one will land
+      }
+    };
+
+    check();
+    const timer = setInterval(check, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [regen?.id, navigate]);
+
+  // Navigating to the finished report keeps this component mounted, so the
+  // "writing a new one" state has to be dropped when the id under it changes.
+  useEffect(() => {
+    setRegen(null);
+  }, [id]);
 
   const download = async () => {
     if (!id) return;
@@ -364,11 +437,70 @@ export default function ReportDetailPage() {
           <Button variant="secondary" size="sm" icon={Printer} onClick={() => window.print()}>
             Print
           </Button>
+          {/* Sits to the left of the export, because it is the thing you do
+              instead of exporting when what is here has gone stale. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RefreshCw}
+            loading={Boolean(regen)}
+            disabled={Boolean(regen)}
+            onClick={writeNewOne}
+          >
+            {regen ? 'Writing…' : 'Write a new one'}
+          </Button>
           <Button size="sm" icon={Download} loading={downloading} onClick={download}>
             Download PDF
           </Button>
         </div>
       </div>
+
+      {/* The new report being written. Loud on purpose - it has to be obvious
+          that what is below is the previous version, not a half-written one. */}
+      {regen && (
+        <div className="no-print shimmer mb-5 animate-slide-down rounded-2xl border border-brand-200 bg-surface shadow-card">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 animate-gradient-pan"
+            style={{
+              backgroundImage:
+                'linear-gradient(110deg, rgb(37 99 235 / 0.12) 0%, rgb(99 102 241 / 0.16) 30%, rgb(37 99 235 / 0.06) 60%, transparent 100%)',
+              backgroundSize: '220% 100%',
+            }}
+          />
+
+          <div className="relative flex items-center gap-4 p-4 sm:p-5">
+            <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+              <span
+                aria-hidden
+                className="absolute inset-0 animate-pulse-ring rounded-full bg-brand-500/30"
+              />
+              <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-brand-gradient shadow-brand">
+                <Sparkles size={19} className="animate-pulse text-white" />
+              </span>
+            </span>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-bold tracking-tight text-ink">
+                Writing a fresh {report.companyName} report
+              </p>
+              <p className="mt-0.5 text-[13px] leading-relaxed text-ink-muted">
+                {regen.step || 'Getting started'} — everything below stays exactly as it is until
+                the new one is ready.
+              </p>
+
+              <div className="mt-2.5 flex items-center gap-3">
+                <ProgressBar percent={regen.percent} className="h-1.5 flex-1" />
+                {typeof regen.percent === 'number' && regen.percent > 0 && (
+                  <span className="shrink-0 text-2xs font-bold tabular-nums text-brand-600">
+                    {Math.min(99, Math.round(regen.percent))}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="no-print mb-4">

@@ -5,8 +5,8 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  Newspaper,
   Plus,
-  RefreshCw,
   Search,
   Settings2,
   Sparkles,
@@ -29,6 +29,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  OverflowMenu,
   PageHeader,
   ProgressBar,
   ScoreRing,
@@ -48,6 +49,11 @@ interface Account {
   employees?: number;
   signalCount: number;
   notes?: string;
+  // Removing an account clears it for the whole team, so the server decides
+  // who is allowed to and the row only renders what it is told.
+  addedByName?: string | null;
+  addedByMe?: boolean;
+  canRemove?: boolean;
   // Crawl settings, editable via AccountSettingsModal. Shared across the
   // workspace: they are facts about the prospect, not one seat's opinion.
   pages?: AccountPages;
@@ -161,12 +167,25 @@ export default function AccountsPage() {
     }
   };
 
+  // Removal is team-wide now, and it takes the reports with it, so the prompt
+  // has to say so rather than the old "remove from your companies?".
   const remove = async (account: Account) => {
-    if (!window.confirm(`Remove ${account.name} from your companies?`)) return;
+    const confirmed = window.confirm(
+      `Remove ${account.name} for the whole team?\n\n` +
+        'It comes off everyone’s list and its reports are deleted. This cannot be undone.'
+    );
+    if (!confirmed) return;
+
     try {
       setBusyId(account._id);
-      await companiesAPI.removeCompany(account._id);
-      setMessage({ tone: 'success', text: `${account.name} removed` });
+      const res = await companiesAPI.removeCompany(account._id);
+      const deleted = res.data?.reportsDeleted || 0;
+      setMessage({
+        tone: 'success',
+        text: `${account.name} removed for the team${
+          deleted ? ` — ${deleted} report${deleted === 1 ? '' : 's'} deleted` : ''
+        }`,
+      });
       load(true);
     } catch (err) {
       setMessage({ tone: 'error', text: apiError(err, 'Could not remove the account') });
@@ -280,17 +299,19 @@ export default function AccountsPage() {
                 style={stagger(i)}
                 className="card overflow-hidden hover:border-slate-300 hover:shadow-raised"
               >
-                <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-start">
+                <div className="flex items-start gap-4 p-4 sm:gap-5 sm:p-5">
                   {/* Score */}
-                  <div className="flex shrink-0 items-center gap-4 lg:w-[112px] lg:flex-col lg:items-center">
+                  <div className="shrink-0">
                     {report?.status === 'complete' && report.score ? (
-                      <ScoreRing value={report.score} band={report.band} size={82} />
+                      <ScoreRing value={report.score} band={report.band} size={64} />
                     ) : (
-                      <div className="flex h-[82px] w-[82px] items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-slate-50/50">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-slate-50/50">
                         {report?.status === 'pending' ? (
-                          <Loader2 size={20} className="animate-spin text-brand-500" />
+                          <Loader2 size={18} className="animate-spin text-brand-500" />
                         ) : (
-                          <span className="text-2xs font-semibold text-ink-faint">Not scored</span>
+                          <span className="px-1 text-center text-2xs font-semibold leading-tight text-ink-faint">
+                            Not scored
+                          </span>
                         )}
                       </div>
                     )}
@@ -298,8 +319,8 @@ export default function AccountsPage() {
 
                   {/* Body */}
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <h2 className="text-lg font-bold tracking-tight text-ink">{account.name}</h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-[17px] font-bold tracking-tight text-ink">{account.name}</h2>
                       {account.ticker && (
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-2xs font-semibold text-ink-muted">
                           {account.ticker}
@@ -321,19 +342,28 @@ export default function AccountsPage() {
                       )}
                     </div>
 
-                    <p className="mt-1 text-[13px] text-ink-muted">
-                      {[account.industry, account.country].filter(Boolean).join(' · ') ||
-                        'We are still gathering details'}
+                    <p className="mt-0.5 text-[12.5px] text-ink-muted">
+                      {[
+                        account.industry,
+                        account.country,
+                        // One shared account per company now, so whose board it
+                        // came from is worth stating on the row itself.
+                        account.addedByName && !account.addedByMe
+                          ? `added by ${account.addedByName}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || 'We are still gathering details'}
                     </p>
 
                     {account.description && (
-                      <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-ink-soft">
+                      <p className="mt-2 line-clamp-2 text-[13.5px] leading-relaxed text-ink-soft">
                         {account.description}
                       </p>
                     )}
 
                     {/* Facts */}
-                    <div className="mt-3.5 flex flex-wrap gap-x-5 gap-y-1.5 text-[13px] text-ink-muted">
+                    <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-ink-muted">
                       {account.employees ? (
                         <span>
                           Employees <strong className="text-ink-soft">{account.employees.toLocaleString()}</strong>
@@ -369,16 +399,19 @@ export default function AccountsPage() {
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex shrink-0 flex-wrap gap-2 lg:w-[168px] lg:flex-col">
+                  {/* Actions. One primary button, everything else behind the
+                      menu - stacking five buttons made the row's height a
+                      function of how many things you could do to it rather
+                      than of how much there was to read. */}
+                  <div className="flex shrink-0 items-center gap-2">
                     {report?.status === 'complete' ? (
                       <Button
                         size="sm"
                         icon={FileText}
                         onClick={() => navigate(`/reports/${report._id}`)}
-                        className="lg:w-full"
                       >
-                        View report
+                        <span className="hidden sm:inline">View report</span>
+                        <span className="sm:hidden">View</span>
                       </Button>
                     ) : (
                       <Button
@@ -387,61 +420,48 @@ export default function AccountsPage() {
                         loading={busy}
                         disabled={report?.status === 'pending'}
                         onClick={() => generate(account)}
-                        className="lg:w-full"
                       >
                         {report?.status === 'pending' ? 'Writing…' : 'Create report'}
                       </Button>
                     )}
 
-                    {report?.status === 'complete' && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        icon={RefreshCw}
-                        loading={busy}
-                        onClick={() => generate(account)}
-                        className="lg:w-full"
-                      >
-                        Write a new one
-                      </Button>
-                    )}
-
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={RefreshCw}
-                      loading={busy}
-                      onClick={() => refresh(account)}
-                      className="lg:w-full"
-                    >
-                      Check for news
-                    </Button>
-
-                    {/* The careers and IR URLs, and which narrow crawls run.
-                        Nothing else in the app can set these, and without a
-                        careers URL a Workday or iCIMS account produces no
-                        hiring numbers at all. */}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={Settings2}
-                      disabled={busy}
-                      onClick={() => setSettingsFor(account)}
-                      className="lg:w-full"
-                    >
-                      Settings
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon={Trash2}
-                      disabled={busy}
-                      onClick={() => remove(account)}
-                      className="lg:w-full"
-                    >
-                      Remove
-                    </Button>
+                    <OverflowMenu
+                      label={`Actions for ${account.name}`}
+                      actions={[
+                        {
+                          // "Write a new one" deliberately lives on the report
+                          // itself and nowhere else: rewriting is a decision
+                          // you make after reading what is already there.
+                          label: 'Check for news',
+                          icon: Newspaper,
+                          disabled: busy,
+                          onClick: () => refresh(account),
+                        },
+                        {
+                          // The careers and IR URLs, and which narrow crawls
+                          // run. Nothing else in the app can set these, and
+                          // without a careers URL a Workday or iCIMS account
+                          // produces no hiring numbers at all.
+                          label: 'Settings',
+                          icon: Settings2,
+                          disabled: busy,
+                          onClick: () => setSettingsFor(account),
+                        },
+                        {
+                          label: 'Remove for the team',
+                          icon: Trash2,
+                          danger: true,
+                          // Only the person who added it, or an admin. The
+                          // server decides; this just renders the answer.
+                          hidden: account.canRemove === false,
+                          disabled: busy,
+                          hint: account.addedByName
+                            ? `Added by ${account.addedByName}`
+                            : undefined,
+                          onClick: () => remove(account),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
 
@@ -471,20 +491,27 @@ export default function AccountsPage() {
       <AddAccountModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAdded={({ companyName, reportId, reportError }) => {
+        onAdded={({ companyName, reportId, reportError, alreadyTracked, addedByName }) => {
           load(true);
+
+          // Adding a company the team already has is not an error and not a
+          // second copy - it refreshes the account and writes a fresh report.
+          const added = alreadyTracked
+            ? `${companyName} is already tracked${addedByName ? ` (added by ${addedByName})` : ''} — refreshing it`
+            : `${companyName} added`;
+
           if (reportError) {
             setMessage({
               tone: 'error',
-              text: `${companyName} was added, but the report did not start: ${reportError.error}`,
+              text: `${added}, but the report did not start: ${reportError.error}`,
             });
           } else if (reportId) {
             setMessage({
               tone: 'info',
-              text: `${companyName} added — we are writing your report now.`,
+              text: `${added} — we are writing a new report now.`,
             });
           } else {
-            setMessage({ tone: 'success', text: `${companyName} added.` });
+            setMessage({ tone: 'success', text: `${added}.` });
           }
         }}
       />

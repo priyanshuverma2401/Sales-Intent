@@ -5,7 +5,7 @@ const Report = require('../models/Report');
 const Company = require('../models/Company');
 const accountTagging = require('../services/accountTagging');
 const jobDataFetcher = require('../services/dataFetchers/jobDataFetcher');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, isManager } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -50,6 +50,23 @@ router.get('/', authenticate, async (req, res) => {
 
     const countByCompany = new Map(counts.map(c => [c._id.toString(), c.count]));
 
+    // Removing an account now clears it for the whole team, so each row has to
+    // say who put it there and whether this viewer is allowed to take it away.
+    // Resolved in one query rather than per row.
+    const adderIds = [...new Set(
+      entries.map(w => w.companyId.addedBy?.toString()).filter(Boolean)
+    )];
+    const adders = adderIds.length
+      ? await User.find({ _id: { $in: adderIds } }).select('firstName lastName email').lean()
+      : [];
+    const adderById = new Map(adders.map(a => [
+      a._id.toString(),
+      `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email,
+    ]));
+
+    const manages = isManager(req.user);
+    const me = req.user._id.toString();
+
     // find() is sorted newest-first, so the first hit per company is the latest
     const latestReport = new Map();
     reports.forEach(r => {
@@ -61,12 +78,18 @@ router.get('/', authenticate, async (req, res) => {
       const company = entry.companyId;
       const key = company._id.toString();
       const report = latestReport.get(key);
+      const addedBy = company.addedBy?.toString();
 
       return {
         ...company.toObject(),
         signalCount: countByCompany.get(key) || 0,
         notes: entry.notes,
         addedAt: entry.addedAt,
+        addedByName: addedBy ? adderById.get(addedBy) || null : null,
+        addedByMe: Boolean(addedBy && addedBy === me),
+        // Accounts stored before `addedBy` was recorded belong to nobody, so
+        // anyone may clear them rather than their being stuck here forever.
+        canRemove: !addedBy || addedBy === me || manages,
         latestReport: report
           ? {
               _id: report._id,
