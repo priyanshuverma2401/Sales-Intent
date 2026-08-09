@@ -306,6 +306,58 @@
   .report-body {
     @apply text-[14.5px] leading-[1.7] text-ink-soft;
   }
+
+  /* --- "Ask anything" island ------------------------------------------------
+     A conic gradient sweeps around the rim of the ask bar. Enough motion that
+     the control reads as the one thing on the page that answers back, without
+     becoming a second attention magnet beside the report itself.
+
+     It is a rotating square behind a 1.5px padding box rather than a
+     border-image: that is the only technique that gets a *moving* gradient to
+     follow a rounded rectangle in every browser. The parent's radius clips it
+     and the inner surface covers the middle, leaving only the hairline lit.
+     Square rather than fitted, so the sweep stays circular on a bar that is far
+     wider than it is tall. */
+  .island {
+    @apply relative overflow-hidden rounded-2xl;
+    padding: 1.5px;
+    background-color: rgb(var(--slate-200));
+    transition: box-shadow 0.3s ease;
+  }
+  .island::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 150%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%) rotate(0deg);
+    background-image: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #2563eb 42deg,
+      #6366f1 78deg,
+      #a855f7 108deg,
+      transparent 152deg,
+      transparent 360deg
+    );
+    opacity: 0.72;
+    animation: island-sweep 6s linear infinite;
+    transition: opacity 0.3s ease;
+  }
+  /* Brighter and quicker while a question is being typed or answered */
+  .island-active {
+    box-shadow: 0 10px 34px -12px rgb(37 99 235 / 0.45);
+  }
+  .island-active::before {
+    opacity: 1;
+    animation-duration: 2.4s;
+  }
+  /* Both the sweep and the content are positioned, so paint order is DOM
+     order - the ::before is drawn first and everything inside covers it. */
+  .island > * {
+    position: relative;
+  }
 }
 
 @layer utilities {
@@ -350,6 +402,18 @@
       transparent
     );
     animation: shimmer 1.6s infinite;
+  }
+}
+
+/* Rim light for the "ask anything" island. Declared outside the layers because
+   the rotation has to carry the centring translate with it - a bare
+   `rotate(360deg)` would drop the offset and swing the square off-centre. */
+@keyframes island-sweep {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
   }
 }
 

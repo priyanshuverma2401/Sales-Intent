@@ -220,6 +220,19 @@ export const signalsAPI = {
   getStats: () => API.get('/signals/stats/by-category'),
 };
 
+/** One replayed turn of an "ask anything" thread. */
+export interface AskTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AskAnswer {
+  answer: string;
+  /** Source numbers the answer cited, in first-mention order. */
+  citations: number[];
+  model?: string;
+}
+
 export const reportsAPI = {
   generate: (companyId: string) => API.post(`/reports/${companyId}`),
   // Filtering happens server-side so it covers the whole history, not just the
@@ -228,6 +241,10 @@ export const reportsAPI = {
     API.get('/reports', { params }),
   getReportFilters: () => API.get('/reports/filters'),
   getReport: (id: string) => API.get(`/reports/${id}`),
+  // "Ask anything" — answered from the stored report alone. The thread is not
+  // persisted server-side, so the prior turns are replayed with each question.
+  ask: (id: string, question: string, history?: AskTurn[]) =>
+    API.post<AskAnswer>(`/reports/${id}/ask`, { question, history }),
   remove: (id: string) => API.delete(`/reports/${id}`),
   // The response is a PDF, so it must be read as a blob rather than parsed
   download: (id: string) => API.get(`/reports/${id}/download`, { responseType: 'blob' }),

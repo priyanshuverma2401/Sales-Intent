@@ -136,6 +136,23 @@ const reportLimiter = limiter(
   'Report generation limit reached for this hour. Try again shortly.'
 );
 
+// Asking a report a question is chat traffic, not report generation: a rep
+// working through a brief before a call asks a handful of follow-ups in a row,
+// and each is an order of magnitude cheaper than writing a report. Sharing the
+// generation budget would mean a few minutes of questions locking the whole
+// desk out of generating anything for an hour.
+const reportAskLimiter = limiter(
+  Number(process.env.RATE_LIMIT_REPORT_ASK) || 120,
+  60 * 60 * 1000,
+  'That is a lot of questions in one hour. Give it a few minutes.'
+);
+
+// Both hang off /api/reports, so the path picks which budget applies.
+const reportTraffic = (req, res, next) =>
+  /^\/[^/]+\/ask\/?$/.test(req.path)
+    ? reportAskLimiter(req, res, next)
+    : reportLimiter(req, res, next);
+
 // The public API is machine traffic: it is keyed per API key rather than per IP,
 // because several integrations behind one NAT would otherwise share a budget,
 // and a leaked key should be throttled wherever it is used from.
@@ -199,7 +216,7 @@ app.use('/api/auth', authLimiter, require('./routes/auth.routes'));
 app.use('/api/organizations', require('./routes/organizations.routes'));
 app.use('/api/companies', require('./routes/companies.routes'));
 app.use('/api/signals', require('./routes/signals.routes'));
-app.use('/api/reports', reportLimiter, require('./routes/reports.routes'));
+app.use('/api/reports', reportTraffic, require('./routes/reports.routes'));
 app.use('/api/accounts', require('./routes/accounts.routes'));
 app.use('/api/alerts', require('./routes/alerts.routes'));
 app.use('/api/inbox', require('./routes/inbox.routes'));

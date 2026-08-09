@@ -235,8 +235,11 @@ export function ReportSection({
   description?: string;
   children: React.ReactNode;
 }) {
+  // scroll-mt clears the two stacked sticky bars above the report - the ask
+  // island and the chapter jump links - so a citation chip pointing at #sources
+  // does not land the heading underneath them.
   return (
-    <section id={id} className="scroll-mt-24">
+    <section id={id} className="scroll-mt-36">
       <div className="card card-pad hover:shadow-raised">
         <div className="mb-4 border-b border-slate-100 pb-3">
           <h2 className="text-[17px] font-bold tracking-tighter text-ink">{title}</h2>

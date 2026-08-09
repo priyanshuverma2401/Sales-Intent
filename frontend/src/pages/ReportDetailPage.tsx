@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { apiError, downloadReportPdf, reportsAPI } from '../services/api';
 import { Alert, Button, Card, ProgressBar, ScoreRing, Spinner, cx } from '../components/ui';
+import AskAnything from '../components/AskAnything';
 import {
   ContractBlock,
   CoverageWarning,
@@ -171,7 +172,9 @@ export default function ReportDetailPage() {
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         if (top) setActiveChapter(top.target.id);
       },
-      { rootMargin: '-96px 0px -70% 0px' }
+      // Top inset matches the two sticky bars (ask island + this nav), so a
+      // chapter counts as "current" only once it clears them
+      { rootMargin: '-128px 0px -70% 0px' }
     );
 
     targets.forEach((el) => observer.observe(el));
@@ -375,6 +378,12 @@ export default function ReportDetailPage() {
         </div>
       )}
 
+      {/* ---------------- Ask anything ----------------
+          Sticky above everything else, because the question a rep has arrives
+          wherever they happen to be in a document this long - scrolling back to
+          the top to ask it is the thing that would stop them asking. */}
+      <AskAnything reportId={id!} report={report} />
+
       {/* ---------------- Cover ---------------- */}
       <Card className="mb-5 animate-fade-in-up overflow-hidden print-block">
         {/* No border-b: with "Written for you" gone this is the only block in
@@ -573,7 +582,11 @@ export default function ReportDetailPage() {
       </Card>
 
       {/* ---------------- Jump links ---------------- */}
-      <div className="no-print glass sticky top-0 z-20 -mx-6 mb-5 border-b border-slate-200/80 px-6">
+      {/* top-[71px] parks this directly under the ask island, which is sticky at
+          0 and 71px tall (10px padding + 1.5px rim + a 48px bar, doubled on the
+          vertical). Both bars stay visible instead of stacking on top of each
+          other. */}
+      <div className="no-print glass sticky top-[71px] z-20 -mx-6 mb-5 border-b border-slate-200/80 px-6">
         <nav className="flex gap-1 overflow-x-auto scrollbar-none">
           {CHAPTERS.map((c) => (
             <a
@@ -885,7 +898,7 @@ export default function ReportDetailPage() {
 // obvious structure, and gives the jump links something to anchor to.
 function Chapter({ id, label, blurb }: { id: string; label: string; blurb?: string }) {
   return (
-    <div id={id} className="scroll-mt-20 pt-6 first:pt-0 print-block">
+    <div id={id} className="scroll-mt-36 pt-6 first:pt-0 print-block">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b-2 border-slate-200 pb-2.5">
         <h2 className="text-xl font-extrabold tracking-tighter text-ink">{label}</h2>
         {blurb && <p className="text-[13px] text-ink-muted">{blurb}</p>}

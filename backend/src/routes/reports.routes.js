@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { authenticate, isManager, sameOrg } = require('../middleware/auth');
 const reportService = require('../services/reportService');
 const reportGenerator = require('../services/reportGenerator');
+const reportQA = require('../services/reportQA');
 
 const router = express.Router();
 
@@ -237,6 +238,48 @@ router.get('/:id', authenticate, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Ask a question about one report
+//
+// Answered from the stored report and nothing else - see services/reportQA.js
+// for why that constraint is the feature rather than a limitation. Read access
+// is the same rule as viewing it: anyone in the tenant who can open the report
+// can question it.
+//
+// The thread lives in the caller's browser, so it is replayed on each request
+// rather than stored. Nothing a user asks about an account is persisted.
+// ---------------------------------------------------------------------------
+router.post('/:id/ask', authenticate, async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+    if (!canRead(report, req)) {
+      return res.status(403).json({ error: 'Not authorized to view this report' });
+    }
+
+    // A half-written report has no findings to question yet, and the reason it
+    // has none is worth saying out loud.
+    if (report.status !== 'complete') {
+      return res.status(409).json({
+        error:
+          report.status === 'pending'
+            ? 'This report is still being written — questions can be answered once it finishes.'
+            : report.error || 'This report did not finish, so there is nothing to ask about yet.',
+      });
+    }
+
+    const result = await reportQA.ask({
+      report,
+      question: req.body?.question,
+      history: req.body?.history,
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 
