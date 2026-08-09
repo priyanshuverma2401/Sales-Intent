@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
+  BarChart3,
   Bell,
   Building2,
   ChevronDown,
@@ -21,9 +22,16 @@ import { useThemeStore } from '../store/themeStore';
 import { inboxAPI } from '../services/api';
 import { Logo, cx } from './ui';
 
+interface NavGroup {
+  label: string;
+  /** Hidden entirely from members - see the filter where the rail is rendered. */
+  managerOnly?: boolean;
+  items: { path: string; label: string; icon: React.ElementType }[];
+}
+
 // Grouped so the sidebar reads as two jobs rather than one flat list: the
 // accounts you work, and the intelligence that comes back about them.
-const NAV_GROUPS = [
+const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
@@ -39,6 +47,13 @@ const NAV_GROUPS = [
       { path: '/alerts', label: 'Alert rules', icon: AlertCircle },
       { path: '/inbox', label: 'Inbox', icon: Mail },
     ],
+  },
+  // Owners and admins only. Filtered out of the rail below rather than
+  // rendered disabled: a member has no use for a link they cannot open.
+  {
+    label: 'Administration',
+    managerOnly: true,
+    items: [{ path: '/analytics', label: 'Analytics', icon: BarChart3 }],
   },
 ];
 
@@ -247,7 +262,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3 scrollbar-none">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.filter((group) => !group.managerOnly || isAdmin).map((group) => (
             <div key={group.label} className="space-y-1">
               {!collapsed && (
                 <p className="eyebrow px-3 pb-1.5 text-brand-200/40">{group.label}</p>

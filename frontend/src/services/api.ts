@@ -161,6 +161,126 @@ export const apiKeysAPI = {
   revoke: (id: string) => API.delete(`/api-keys/${id}`),
 };
 
+// --- Analytics & the activity log (owner/admin only) ------------------------
+
+/** One day in the time series. Every day in the range is present, zeros included. */
+export interface AnalyticsDay {
+  date: string;
+  reports: number;
+  accounts: number;
+  signals: number;
+  actions: number;
+}
+
+export interface AnalyticsPerson {
+  _id: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'admin' | 'member';
+  accounts: number;
+  reports: number;
+  reportsCompleted: number;
+  avgScore: number | null;
+  actions: number;
+  lastActive: string | null;
+  joinedAt: string;
+}
+
+export interface AnalyticsOverview {
+  range: { days: number; from: string; to: string };
+  kpis: {
+    members: number;
+    activeMembers: number;
+    seats: number;
+    accountsTracked: number;
+    accountsWithReports: number;
+    reportsInRange: number;
+    reportsAllTime: number;
+    reportsPending: number;
+    reportsFailed: number;
+    signalsInRange: number;
+    actionsInRange: number;
+    failedActions: number;
+  };
+  series: AnalyticsDay[];
+  breakdown: {
+    reportStatus: { status: string; count: number }[];
+    scoreBands: { band: string; count: number }[];
+    signalTypes: { type: string; count: number }[];
+    activityCategories: { category: string; count: number }[];
+    topActions: { action: string; count: number }[];
+    industries: { industry: string; count: number }[];
+  };
+  people: AnalyticsPerson[];
+  topAccounts: { _id: string; name: string; reports: number; bestScore: number | null; lastAt: string }[];
+  retentionDays: number;
+}
+
+/** One recorded action. `actor` is a frozen copy — it survives the seat being deleted. */
+export interface ActivityEntry {
+  _id: string;
+  userId?: string;
+  actor: { name?: string; email?: string; role?: string };
+  action: string;
+  category: string;
+  description: string;
+  target?: { type?: string; id?: string; label?: string };
+  outcome: 'success' | 'failure';
+  method?: string;
+  path?: string;
+  statusCode?: number;
+  durationMs?: number;
+  ip?: string;
+  userAgent?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface ActivityFilters {
+  page?: number;
+  limit?: number;
+  userId?: string;
+  category?: string;
+  action?: string;
+  outcome?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+}
+
+export const analyticsAPI = {
+  overview: (days: number) => API.get<AnalyticsOverview>('/analytics/overview', { params: { days } }),
+  activity: (params: ActivityFilters) =>
+    API.get<{ entries: ActivityEntry[]; total: number; page: number; limit: number; pages: number }>(
+      '/analytics/activity',
+      { params }
+    ),
+  filters: () =>
+    API.get<{
+      actions: string[];
+      categories: string[];
+      members: { _id: string; name: string; email: string; role: string }[];
+      retentionDays: number;
+    }>('/analytics/filters'),
+  // CSV of exactly what the filters select, so a tenant can keep a copy past
+  // the retention window
+  exportCsv: (params: ActivityFilters) =>
+    API.get('/analytics/activity/export', { params, responseType: 'blob' }),
+};
+
+/** Triggers a browser download of the filtered activity log. */
+export async function downloadActivityCsv(params: ActivityFilters) {
+  const res = await analyticsAPI.exportCsv(params);
+  const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `activity-log-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export const companiesAPI = {
   search: (q: string) => API.get('/companies/search', { params: { q } }),
   getWatchlist: () => API.get('/companies'),

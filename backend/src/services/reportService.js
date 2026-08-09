@@ -6,6 +6,7 @@ const aiEngine = require('./aiEngine');
 const crmService = require('./crm');
 const companyDataFetcher = require('./dataFetchers/companyDataFetcher');
 const accountTagging = require('./accountTagging');
+const activityLog = require('./activityLog');
 
 /**
  * Owns the "generate a report" use case so both the accounts route (auto-run on
@@ -197,6 +198,21 @@ class ReportService {
             },
           }
         ).catch((e) => console.error('❌ Could not record the failure:', e.message));
+
+        // The request that asked for this report was logged when it returned
+        // its 202, but generation runs long after that response. Without this
+        // the audit trail shows reports being started and never says whether
+        // any of them landed.
+        activityLog.record({
+          organization,
+          user,
+          action: 'report.failed',
+          category: 'reports',
+          outcome: 'failure',
+          description: `The report on ${company.name} did not finish`,
+          target: { type: 'report', id: String(report._id), label: company.name },
+          metadata: { reason: error.message?.slice(0, 300) },
+        });
       });
     });
 
@@ -291,6 +307,18 @@ class ReportService {
         actionText: 'View report',
       }).save().catch(() => {});
     }
+
+    activityLog.record({
+      organization,
+      user,
+      action: 'report.complete',
+      category: 'reports',
+      description: `The report on ${company.name} finished${
+        report.score?.value != null ? ` with a fit score of ${report.score.value}` : ''
+      }`,
+      target: { type: 'report', id: String(report._id), label: company.name },
+      metadata: { score: report.score?.value, model: report.aiModel },
+    });
 
     console.log(`✅ Report complete for ${company.name}`);
     return report;

@@ -16,6 +16,8 @@ const { initSupabase, verifySupabase, getSupabase } = require('./config/supabase
 const aiProviders = require('./services/providers');
 const reportSweeper = require('./services/reportSweeper');
 const signalScheduler = require('./services/signalScheduler');
+const activityLog = require('./services/activityLog');
+const ActivityLog = require('./models/ActivityLog');
 
 const app = express();
 
@@ -172,6 +174,16 @@ const publicApiLimiter = rateLimit({
 app.use('/api', globalLimiter);
 
 // ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+// Mounted above every route rather than called from inside them: a handler that
+// forgets to log leaves a hole nobody notices until they go looking for the
+// entry that was never written. Rows are written after the response has already
+// gone out, and every failure inside is swallowed - the log must never be able
+// to break a request that otherwise worked.
+app.use('/api', activityLog.middleware);
+
+// ---------------------------------------------------------------------------
 // Data stores
 // ---------------------------------------------------------------------------
 let hasConnectedOnce = false;
@@ -184,6 +196,10 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('✅ MongoDB connected');
     // Clears reports the previous instance was generating when it was replaced.
     reportSweeper.start();
+    // Points the activity log's TTL index at the configured retention window.
+    // Creating the index is enough on a fresh database; this is what moves it
+    // when ACTIVITY_LOG_RETENTION_DAYS changes on an existing one.
+    ActivityLog.ensureRetention();
     // Keeps the signals feed moving without anybody pressing Refresh. Reports
     // stay on demand - this only files signals.
     signalScheduler.start();
@@ -222,6 +238,8 @@ app.use('/api/alerts', require('./routes/alerts.routes'));
 app.use('/api/inbox', require('./routes/inbox.routes'));
 app.use('/api/integrations', require('./routes/integrations.routes'));
 app.use('/api/api-keys', require('./routes/apiKeys.routes'));
+// Owner/admin only, enforced inside the router
+app.use('/api/analytics', require('./routes/analytics.routes'));
 
 // Public read API, authenticated by API key rather than a session
 app.use('/api/v1', publicApiLimiter, require('./routes/publicApi.routes'));

@@ -110,6 +110,11 @@ services:
       - key: THIN_COVERAGE_FLOOR
         value: "15"
 
+      # Audit trail behind the admin Analytics page. Entries expire after this
+      # many days; the TTL index is re-pointed on boot when the value changes.
+      - key: ACTIVITY_LOG_RETENTION_DAYS
+        value: "365"
+
       # Nightly signal sweep. Reports stay on demand; only signals refresh on
       # their own. In-process, so a sweep fires only while an instance is awake
       # - the boot run is what catches up after the host idles it to sleep.

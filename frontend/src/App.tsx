@@ -16,6 +16,7 @@ import InboxPage from './pages/InboxPage';
 import ReportsPage from './pages/ReportsPage';
 import ReportDetailPage from './pages/ReportDetailPage';
 import SettingsPage from './pages/SettingsPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 
 import Layout from './components/Layout';
 import { Logo } from './components/ui';
@@ -47,6 +48,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return <Layout>{children}</Layout>;
+}
+
+/**
+ * A page only an owner or admin may open.
+ *
+ * The sidebar already hides the link, but hiding a link is presentation, not
+ * access control - somebody who types the URL, or returns to a bookmark after
+ * being demoted, has to land somewhere else. The API enforces the same rule
+ * independently; this only decides what the browser renders.
+ */
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isBootstrapping } = useAuthStore();
+
+  // Never redirect on a role that has not been loaded yet - that would bounce
+  // an admin off their own page on every refresh.
+  if (isBootstrapping) return <ProtectedRoute>{children}</ProtectedRoute>;
+
+  if (user && user.role !== 'owner' && user.role !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+
+  return <ProtectedRoute>{children}</ProtectedRoute>;
 }
 
 function App() {
@@ -101,6 +124,7 @@ function App() {
         <Route path="/alerts" element={protect(<AlertsPage />)} />
         <Route path="/inbox" element={protect(<InboxPage />)} />
         <Route path="/settings" element={protect(<SettingsPage />)} />
+        <Route path="/analytics" element={<AdminRoute><AnalyticsPage /></AdminRoute>} />
 
         {/* Unknown paths fall back to the dashboard */}
         <Route path="*" element={<Navigate to="/" replace />} />
