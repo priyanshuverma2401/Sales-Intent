@@ -186,13 +186,25 @@ export default function ReportsPage() {
     }
   };
 
+  // The account goes with the report - there is only ever one report per
+  // account, so the server treats deleting it as removing the account. Said
+  // plainly up front, because it takes the prospect off the whole team's board.
   const remove = async (report: ReportSummary) => {
-    if (!window.confirm(`Delete the ${report.companyName} report?`)) return;
+    const confirmed = window.confirm(
+      `Delete the ${report.companyName} report?\n\n` +
+        `This also removes ${report.companyName} from the team's accounts, along with its signals and alerts.`
+    );
+    if (!confirmed) return;
+
     try {
       setBusyId(report._id);
       await reportsAPI.remove(report._id);
       setReports((prev) => prev.filter((r) => r._id !== report._id));
       setTotal((prev) => Math.max(0, prev - 1));
+      setMessage({
+        tone: 'success',
+        text: `${report.companyName} removed for the team.`,
+      });
       // That may have been the last report by an author or in an industry
       loadOptions();
     } catch (err) {
@@ -468,16 +480,20 @@ export default function ReportsPage() {
                           onClick: () => openSettings(report),
                         },
                         {
-                          label: 'Delete report',
+                          // Named for what it actually does: the account is
+                          // removed with the report, since there is one report
+                          // per account and an empty row would only invite a
+                          // second Generate.
+                          label: 'Delete report & account',
                           icon: Trash2,
                           danger: true,
-                          // Whoever wrote it, or an owner/admin. The server
+                          // The account's owner, or an owner/admin. The server
                           // decides and enforces it; this only renders it.
                           hidden: report.status === 'pending' || report.canDelete === false,
                           disabled: busy,
                           hint: report.isMine
-                            ? undefined
-                            : `Written by ${report.author?.name || 'a teammate'}`,
+                            ? 'Removes the account for the team'
+                            : `Written by ${report.author?.name || 'a teammate'} — removes the account for the team`,
                           onClick: () => remove(report),
                         },
                       ]}

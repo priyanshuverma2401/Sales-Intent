@@ -22,21 +22,70 @@ function matchesQuery(company, q) {
     .some(field => String(field).toLowerCase().includes(needle));
 }
 
-// The user's accounts, each with its signal count and the state of its most
+/**
+ * Which accounts this request is about.
+ *
+ * The board is per-seat: adding an account puts it on the adder's list and on
+ * nobody else's. That left an owner unable to even see - let alone remove - an
+ * account a colleague had put there, so a manager may ask for the whole
+ * tenant's book with ?scope=all. Members get their own list whatever they ask
+ * for; the scope is a convenience for the people who already run the tenant,
+ * not a way to widen anybody's reach.
+ *
+ * Returns `{ entry, trackedByMe }` pairs rather than bare watchlist entries,
+ * because on the team-wide board the row may belong to somebody else.
+ */
+async function boardEntries(req) {
+  const me = req.user._id.toString();
+  const orgId = req.organization?._id;
+  const wantsTeam = String(req.query.scope || '') === 'all' && isManager(req.user) && orgId;
+
+  if (!wantsTeam) {
+    const user = await User.findById(req.user._id).populate('watchlist.companyId');
+    return (user.watchlist || [])
+      .filter(w => w.companyId)
+      .map(entry => ({ entry, trackedByMe: true }));
+  }
+
+  const members = await User.find({ organizationId: orgId })
+    .select('_id watchlist')
+    .populate('watchlist.companyId');
+
+  // One row per account however many colleagues are watching it. The caller's
+  // own entry wins where they have one, so the notes on the row stay their own.
+  const byCompany = new Map();
+
+  members.forEach((member) => {
+    const mine = member._id.toString() === me;
+
+    (member.watchlist || []).filter(w => w.companyId).forEach((entry) => {
+      const key = entry.companyId._id.toString();
+      const seen = byCompany.get(key);
+
+      if (!seen || (mine && !seen.trackedByMe)) {
+        byCompany.set(key, { entry, trackedByMe: mine });
+      }
+    });
+  });
+
+  return [...byCompany.values()];
+}
+
+// The caller's accounts, each with its signal count and the state of its most
 // recent report - everything the accounts board needs in one call.
-//   ?q=hsbc   company name, ticker, industry or country
+//   ?q=hsbc      company name, ticker, industry or country
+//   ?scope=all   every account in the tenant (owner/admin only)
 router.get('/', authenticate, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('watchlist.companyId');
-    const all = (user.watchlist || []).filter(w => w.companyId);
+    const all = await boardEntries(req);
 
     const q = String(req.query.q || '').trim();
-    const entries = q ? all.filter(w => matchesQuery(w.companyId, q)) : all;
+    const rows = q ? all.filter(r => matchesQuery(r.entry.companyId, q)) : all;
 
     // Unfiltered size, so the UI can say "1 of 12" without a second request
     res.set('X-Total-Count', String(all.length));
 
-    const companyIds = entries.map(w => w.companyId._id);
+    const companyIds = rows.map(r => r.entry.companyId._id);
 
     // Reports belong to the tenant, not to the seat: there is one per account,
     // and whoever generated it, it is the report for this row. Scoping this to
@@ -45,8 +94,8 @@ router.get('/', authenticate, async (req, res) => {
     // there in the first place. The author's own work is unioned in for reports
     // written before organizationId was stored.
     const reportScope = req.organization?._id
-      ? { $or: [{ organizationId: req.organization._id }, { userId: user._id }] }
-      : { userId: user._id };
+      ? { $or: [{ organizationId: req.organization._id }, { userId: req.user._id }] }
+      : { userId: req.user._id };
 
     const [counts, reports] = await Promise.all([
       Signal.aggregate([
@@ -64,7 +113,7 @@ router.get('/', authenticate, async (req, res) => {
     // say who put it there and whether this viewer is allowed to take it away.
     // Resolved in one query rather than per row.
     const adderIds = [...new Set(
-      entries.map(w => w.companyId.addedBy?.toString()).filter(Boolean)
+      rows.map(r => r.entry.companyId.addedBy?.toString()).filter(Boolean)
     )];
     const adders = adderIds.length
       ? await User.find({ _id: { $in: adderIds } }).select('firstName lastName email').lean()
@@ -84,7 +133,7 @@ router.get('/', authenticate, async (req, res) => {
       if (!latestReport.has(key)) latestReport.set(key, r);
     });
 
-    res.json(entries.map(entry => {
+    res.json(rows.map(({ entry, trackedByMe }) => {
       const company = entry.companyId;
       const key = company._id.toString();
       const report = latestReport.get(key);
@@ -93,8 +142,11 @@ router.get('/', authenticate, async (req, res) => {
       return {
         ...company.toObject(),
         signalCount: countByCompany.get(key) || 0,
-        notes: entry.notes,
+        // On the team-wide board this row may be a colleague's, in which case
+        // the notes and the date are theirs and not the caller's to edit.
+        notes: trackedByMe ? entry.notes : undefined,
         addedAt: entry.addedAt,
+        trackedByMe,
         addedByName: addedBy ? adderById.get(addedBy) || null : null,
         addedByMe: Boolean(addedBy && addedBy === me),
         // Accounts stored before `addedBy` was recorded belong to nobody, so
@@ -161,16 +213,22 @@ router.patch('/:companyId', authenticate, async (req, res) => {
       w => w.companyId?.toString() === req.params.companyId
     );
 
-    if (!entry) return res.status(404).json({ error: 'Account not in your list' });
+    // A manager may be working from the team-wide board, where the account sits
+    // on a colleague's list rather than their own. Everything below except the
+    // notes lives on the shared Company record, so there is nothing stopping
+    // them editing it; the notes are personal and simply have nowhere to go.
+    if (!entry && !isManager(req.user)) {
+      return res.status(404).json({ error: 'Account not in your list' });
+    }
 
-    if (req.body.notes !== undefined) {
+    if (entry && req.body.notes !== undefined) {
       entry.notes = req.body.notes;
       await req.user.save();
     }
 
     const { pages, tags } = req.body;
     if (!pages && !tags) {
-      return res.json({ message: 'Account updated', notes: entry.notes });
+      return res.json({ message: 'Account updated', notes: entry?.notes });
     }
 
     const company = await Company.findById(req.params.companyId);

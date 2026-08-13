@@ -321,8 +321,11 @@ export interface AccountTags {
 }
 
 export const accountsAPI = {
-  // Search runs server-side, like every other list in the API
-  getAccounts: (params?: { q?: string }) => API.get('/accounts', { params }),
+  // Search runs server-side, like every other list in the API. scope:'all' asks
+  // for the whole tenant's accounts rather than the caller's own board, and is
+  // honoured for owners and admins only.
+  getAccounts: (params?: { q?: string; scope?: 'mine' | 'all' }) =>
+    API.get('/accounts', { params }),
   update: (
     companyId: string,
     data: { notes?: string; pages?: AccountPages; tags?: AccountTags }

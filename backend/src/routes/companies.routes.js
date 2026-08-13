@@ -1,10 +1,6 @@
-const fs = require('fs');
 const express = require('express');
 const Company = require('../models/Company');
 const User = require('../models/User');
-const Report = require('../models/Report');
-const Signal = require('../models/Signal');
-const Alert = require('../models/Alert');
 const { authenticate, isManager } = require('../middleware/auth');
 const companyDataFetcher = require('../services/dataFetchers/companyDataFetcher');
 const financialDataFetcher = require('../services/dataFetchers/financialDataFetcher');
@@ -13,6 +9,7 @@ const logoDevFetcher = require('../services/dataFetchers/logoDevFetcher');
 const brandfetchFetcher = require('../services/dataFetchers/brandfetchFetcher');
 const signalService = require('../services/signalService');
 const reportService = require('../services/reportService');
+const accountRemoval = require('../services/accountRemoval');
 
 const router = express.Router();
 
@@ -468,8 +465,8 @@ router.get('/:id', authenticate, async (req, res) => {
  * before `addedBy` was recorded belong to nobody, so anyone on the team may
  * clear them rather than their being stuck on the board forever.
  *
- * The Company document itself survives: it is shared with every other tenant
- * watching the same prospect, and none of them asked for it to go.
+ * The teardown itself lives in accountRemoval, shared with the report delete:
+ * one account has one report, so removing either has to clear both.
  */
 router.delete('/:id', authenticate, async (req, res) => {
   try {
@@ -490,39 +487,12 @@ router.delete('/:id', authenticate, async (req, res) => {
       });
     }
 
-    const orgId = req.organization?._id;
-    const memberIds = orgId
-      ? await User.distinct('_id', { organizationId: orgId })
-      : [req.user._id];
-
-    await User.updateMany(
-      { _id: { $in: memberIds } },
-      { $pull: { watchlist: { companyId: company._id } } }
-    );
-
-    // Each report owns a rendered PDF on disk, so the files go before the
-    // records that point at them - otherwise the directory grows forever.
-    const reports = await Report.find({
-      companyId: company._id,
-      $or: [{ organizationId: orgId }, { userId: { $in: memberIds } }],
-    }).select('pdfPath');
-
-    reports.forEach((report) => {
-      if (report.pdfPath && fs.existsSync(report.pdfPath)) fs.unlink(report.pdfPath, () => {});
-    });
-    await Report.deleteMany({ _id: { $in: reports.map(r => r._id) } });
-
-    // Only this tenant's own signals. Signals derived from public sources are
-    // shared with every other tenant watching the same company.
-    if (orgId) await Signal.deleteMany({ companyId: company._id, organizationId: orgId });
-
-    // An alert rule on an account nobody is watching would keep firing
-    await Alert.deleteMany({ companyId: company._id, userId: { $in: memberIds } });
+    const { reportsDeleted } = await accountRemoval.removeForTenant(company, req);
 
     res.json({
       message: `${company.name} removed for the team`,
       companyName: company.name,
-      reportsDeleted: reports.length,
+      reportsDeleted,
     });
   } catch (error) {
     console.error('Remove account error:', error);

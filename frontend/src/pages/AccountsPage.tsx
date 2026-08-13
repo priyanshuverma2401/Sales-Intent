@@ -35,8 +35,14 @@ import {
   ProgressBar,
   ScoreRing,
   SkeletonRows,
+  cx,
   stagger,
 } from '../components/ui';
+
+const SCOPES = [
+  { value: 'mine' as const, label: 'Mine' },
+  { value: 'all' as const, label: 'All accounts' },
+];
 
 interface Account {
   _id: string;
@@ -55,6 +61,9 @@ interface Account {
   addedByName?: string | null;
   addedByMe?: boolean;
   canRemove?: boolean;
+  // False only on the team-wide board, where the row is a colleague's rather
+  // than the viewer's. Their notes are not shown and not editable.
+  trackedByMe?: boolean;
   // Crawl settings, editable via AccountSettingsModal. Shared across the
   // workspace: they are facts about the prospect, not one seat's opinion.
   pages?: AccountPages;
@@ -89,7 +98,14 @@ function money(value?: number) {
 
 export default function AccountsPage() {
   const navigate = useNavigate();
-  const { organization } = useAuthStore();
+  const { organization, user } = useAuthStore();
+
+  // The board is one seat's own list. An owner or admin can switch it to the
+  // whole tenant's - otherwise an account a colleague added is invisible to
+  // them, and so is the Remove they are entitled to press on it.
+  const isManager = user?.role === 'owner' || user?.role === 'admin';
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const teamView = isManager && scope === 'all';
 
   // Every account in the tenant is read through the same lens - the company
   // profile - so it is shown once here rather than repeated on every row.
@@ -118,7 +134,10 @@ export default function AccountsPage() {
     async (silent = false) => {
       try {
         if (!silent) setLoading(true);
-        const res = await accountsAPI.getAccounts(search ? { q: search } : undefined);
+        const res = await accountsAPI.getAccounts({
+          ...(search ? { q: search } : {}),
+          ...(teamView ? { scope: 'all' as const } : {}),
+        });
         setAccounts(res.data);
         setTotal(Number(res.headers['x-total-count'] ?? res.data.length));
       } catch (err) {
@@ -128,7 +147,7 @@ export default function AccountsPage() {
         setLoading(false);
       }
     },
-    [search]
+    [search, teamView]
   );
 
   // Refetches when the search changes, because `load` depends on it
@@ -206,13 +225,45 @@ export default function AccountsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Your pipeline"
+        eyebrow={teamView ? organization?.name : 'Your pipeline'}
         title="Accounts"
-        description="Every company you are working on, scored on how well they fit what you sell."
+        description={
+          teamView
+            ? 'Every company your team is working on, whoever added it, scored on how well they fit what you sell.'
+            : 'Every company you are working on, scored on how well they fit what you sell.'
+        }
         actions={
-          <Button icon={Plus} onClick={() => setModalOpen(true)}>
-            Add a company
-          </Button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Owners and admins only: a member's board is always their own */}
+            {isManager && (
+              <div
+                role="radiogroup"
+                aria-label="Which accounts to show"
+                className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-surface p-1 shadow-card"
+              >
+                {SCOPES.map((option) => (
+                  <button
+                    key={option.value}
+                    role="radio"
+                    aria-checked={scope === option.value}
+                    onClick={() => setScope(option.value)}
+                    className={cx(
+                      'rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-all duration-200 ease-swift',
+                      scope === option.value
+                        ? 'bg-brand-gradient text-white shadow-brand'
+                        : 'text-ink-muted hover:bg-slate-50 hover:text-ink'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Button icon={Plus} onClick={() => setModalOpen(true)}>
+              Add a company
+            </Button>
+          </div>
         }
       />
 

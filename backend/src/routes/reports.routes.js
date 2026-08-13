@@ -8,6 +8,7 @@ const { authenticate, isManager, sameOrg } = require('../middleware/auth');
 const reportService = require('../services/reportService');
 const reportGenerator = require('../services/reportGenerator');
 const reportQA = require('../services/reportQA');
+const accountRemoval = require('../services/accountRemoval');
 
 const router = express.Router();
 
@@ -33,10 +34,15 @@ function sameLinks(a = [], b = []) {
 /**
  * Who may delete a report.
  *
- * Governed by the account rather than by who pressed Generate: an account is
- * one shared thing the whole team works now, and the person who put it on the
- * board is the one answerable for what is filed against it. An owner or admin
- * may remove anything in the tenant.
+ * An owner or admin may remove anything they can read, no further questions:
+ * they run the tenant, so nothing it produced should be beyond them. That is
+ * checked against canRead rather than sameOrg so it also covers reports written
+ * before organizationId was stored - those surface to nobody but their own
+ * author, so this cannot reach into another tenant's work.
+ *
+ * For everyone else it is governed by the account rather than by who pressed
+ * Generate: an account is one shared thing the whole team works, and the person
+ * who put it on the board is the one answerable for what is filed against it.
  *
  * `accountAddedBy` is the company's `addedBy`. Accounts stored before that was
  * recorded belong to nobody, so on those the report's own author can still
@@ -45,10 +51,10 @@ function sameLinks(a = [], b = []) {
 function canDelete(report, req, accountAddedBy) {
   const me = req.user._id.toString();
 
+  if (isManager(req.user) && canRead(report, req)) return true;
   if (accountAddedBy && accountAddedBy.toString() === me) return true;
-  if (!accountAddedBy && isAuthor(report, req)) return true;
 
-  return isManager(req.user) && sameOrg(report, req);
+  return !accountAddedBy && isAuthor(report, req);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,13 +374,20 @@ router.get('/:id/download', authenticate, async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Delete
+//
+// The account goes with it. There is one report per account per tenant, so a
+// report delete that left the account behind would leave an empty row on the
+// board that only invites somebody to press Generate again - which is how the
+// duplicates got there in the first place. Deleting the report and removing the
+// account are the same act, and the response says so rather than letting the
+// account quietly vanish.
 // ---------------------------------------------------------------------------
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const report = await Report.findById(req.params.id);
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
-    const company = await Company.findById(report.companyId).select('addedBy').lean();
+    const company = report.companyId ? await Company.findById(report.companyId) : null;
 
     // Distinguish "not yours" from "does not exist": a member can see this
     // report in the list, so a 404 here would read as a bug rather than a rule.
@@ -386,12 +399,28 @@ router.delete('/:id', authenticate, async (req, res) => {
       });
     }
 
+    // Clears the watchlists, the tenant's signals and alerts, and every report
+    // filed against the account - this one among them, PDF included.
+    if (company) {
+      const { reportsDeleted } = await accountRemoval.removeForTenant(company, req);
+
+      return res.json({
+        message: `${company.name} removed for the team`,
+        accountRemoved: true,
+        companyId: company._id,
+        companyName: company.name,
+        reportsDeleted,
+      });
+    }
+
+    // A report with no account left to remove - orphaned by an earlier delete.
+    // Nothing to tear down, so just take the record and its PDF.
     if (report.pdfPath && fs.existsSync(report.pdfPath)) {
       fs.unlink(report.pdfPath, () => {});
     }
     await report.deleteOne();
 
-    res.json({ message: 'Report deleted' });
+    res.json({ message: 'Report deleted', accountRemoved: false, reportsDeleted: 1 });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
