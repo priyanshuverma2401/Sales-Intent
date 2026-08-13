@@ -664,7 +664,10 @@ export default function ReportDetailPage() {
                 {facts.employees ? (
                   <FactRow
                     icon={Users}
-                    value={`${Number(facts.employees).toLocaleString()} employees`}
+                    value={
+                      `${Number(facts.employees).toLocaleString()} employees` +
+                      (facts.employeesAsOf ? ` (${facts.employeesAsOf})` : '')
+                    }
                   />
                 ) : null}
                 {quickLinks.map((link: any) => (

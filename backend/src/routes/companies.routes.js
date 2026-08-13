@@ -309,6 +309,7 @@ router.post('/', authenticate, async (req, res) => {
         description: companyInfo.description,
         website: companyInfo.website,
         employees: companyInfo.employees,
+        employeesAsOf: companyInfo.employeesAsOf,
         foundedYear: companyInfo.foundedYear,
         logoUrl: companyInfo.logo,
         profiles: companyInfo.profiles,

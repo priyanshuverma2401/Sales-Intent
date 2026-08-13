@@ -38,6 +38,7 @@ class ReportService {
       industry: company.industry,
       headquarters: place.join(', ') || undefined,
       employees: company.employees,
+      employeesAsOf: company.employeesAsOf,
       founded: company.foundedYear,
       website: company.website,
       ticker: company.ticker,

@@ -866,7 +866,11 @@ class ReportGenerator {
     // Headcount is not a link, but the deck lists it here and so does the web
     // report, so the two covers stay the same shape
     if (facts.employees) {
-      const headcount = `${Number(facts.employees).toLocaleString()} employees`;
+      // Stamped with its year the way revenue is above. A headcount is only ever
+      // true of a moment, and the rep quoting it on a call needs to know whether
+      // that moment was last year or nine years ago.
+      const headcount = `${Number(facts.employees).toLocaleString()} employees`
+        + (facts.employeesAsOf ? ` (${facts.employeesAsOf})` : '');
       doc.font(F.regular).fontSize(9.5);
       if (this.coverFits(cursor, doc.heightOfString(headcount, { width: width - 20, lineGap: 2 }))) {
         this.drawIcon(doc, 'person', x, cursor - 0.5, 10.5, C.blue);

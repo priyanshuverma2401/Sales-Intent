@@ -160,15 +160,17 @@ class FirmographicsFetcher {
   }
 
   /**
-   * The one claim worth reading out of a property's history.
+   * The one claim worth reading off a property that states a company's *state* —
+   * where it is headquartered, what it is called, which site is its homepage.
    *
-   * Wikidata keeps every figure a company ever reported, so P1128 alone can hold
-   * a decade of headcounts. Preferred rank wins when an editor has marked a
-   * current value; otherwise the most recent year does.
+   * Preferred rank is the editor saying "this is the current one", which is
+   * exactly right for a property that has a single true value at a time. Use
+   * `latest` instead for a property that accumulates a figure per year; there,
+   * rank goes stale and the year is the only thing worth trusting.
    *
-   * `undatedWins` splits the two kinds of property. An undated headcount is the
-   * present one, so it should beat a figure stamped 2019. An undated revenue is
-   * just a figure with its period lost, and a dated one is strictly better.
+   * `undatedWins` decides where a claim with no point-in-time qualifier sorts.
+   * An undated headquarters is the present one; an undated figure is just one
+   * whose period was lost.
    */
   best(claims = [], { undatedWins = false } = {}) {
     const usable = claims.filter(c => c.rank !== 'deprecated' && c.mainsnak?.datavalue);
@@ -181,6 +183,31 @@ class FirmographicsFetcher {
     const rank = claim => this.claimYear(claim) ?? (undatedWins ? Infinity : -Infinity);
 
     return pool.reduce((winner, claim) => (rank(claim) > rank(winner) ? claim : winner));
+  }
+
+  /**
+   * The current value of a property whose whole history Wikidata keeps.
+   *
+   * Headcount and revenue gain a claim per reporting year, so the one we want is
+   * simply the latest — and rank must not get a say in it. Infosys states
+   * 193,383 (2016), 200,364 (2017, *preferred*) and 328,594 (2026): `best`
+   * filters to the preferred pool first and so answers with the 2017 figure,
+   * because an editor marked it current a decade ago and never cleared it.
+   * Every long-lived item drifts that way, which is how a cover ends up quoting
+   * a headcount nine years stale.
+   *
+   * Rank only breaks a tie between claims of the same year. An undated claim is
+   * a figure with its period lost, so it wins only when nothing here is dated.
+   */
+  latest(claims = []) {
+    const usable = claims.filter(c => c.rank !== 'deprecated' && c.mainsnak?.datavalue);
+    if (!usable.length) return null;
+
+    const dated = usable.filter(c => this.claimYear(c) !== null);
+    if (!dated.length) return this.best(usable);
+
+    const weight = claim => this.claimYear(claim) * 2 + (claim.rank === 'preferred' ? 1 : 0);
+    return dated.reduce((winner, claim) => (weight(claim) > weight(winner) ? claim : winner));
   }
 
   /** A claim that has not been superseded — no end-time qualifier on it. */
@@ -412,8 +439,8 @@ class FirmographicsFetcher {
     const claims = entity.claims || {};
 
     const hqClaim = this.current(claims[P.headquarters]);
-    const employeeClaim = this.best(claims[P.employees], { undatedWins: true });
-    const revenueClaim = this.best(claims[P.revenue]);
+    const employeeClaim = this.latest(claims[P.employees]);
+    const revenueClaim = this.latest(claims[P.revenue]);
     const industryIds = (claims[P.industry] || [])
       .filter(c => c.rank !== 'deprecated')
       .map(c => this.itemId(c))

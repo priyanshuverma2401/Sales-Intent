@@ -288,10 +288,19 @@ class CompanyDataFetcher {
 
     if (firmographics) {
       // Wikidata is the only source for these, so it does not have to compete
-      for (const key of ['city', 'country', 'employees', 'revenue', 'revenueCurrency', 'revenueAsOf', 'foundedYear']) {
+      for (const key of ['city', 'country', 'revenue', 'revenueCurrency', 'revenueAsOf', 'foundedYear']) {
         if (companyInfo[key] === undefined && firmographics[key] !== undefined && firmographics[key] !== null) {
           companyInfo[key] = firmographics[key];
         }
+      }
+
+      // Headcount is the exception to filling gaps only. Crunchbase states the
+      // top of a band rather than a count - num_employees_max is 1000 for
+      // "501-1000" - so a figure Wikidata or the article stamps with a year is
+      // the better answer even though the field is already spoken for.
+      if (firmographics.employees) {
+        companyInfo.employees = firmographics.employees;
+        companyInfo.employeesAsOf = firmographics.employeesAsOf;
       }
       // Finnhub's industry ("Banking") reads better than Wikidata's item label
       // ("economics of banking"), so this only fills a gap
@@ -395,8 +404,13 @@ class CompanyDataFetcher {
     // what turns the report's LinkedIn and Crunchbase entries from a search
     // page into the company's own page on a rerun
     const needsProfiles = !company.profiles?.linkedin || !company.profiles?.crunchbase;
+    // A headcount with no year attached was written by the read that took
+    // Wikidata's preferred rank at its word, which for a long-lived item is
+    // usually a figure an editor marked current years ago. Those records are
+    // wrong rather than merely thin, so they are looked at again.
+    const needsHeadcount = !company.employees || !company.employeesAsOf;
     const missing =
-      !company.city || needsRevenue || needsLogo || needsProfiles || !company.employees ||
+      !company.city || needsRevenue || needsLogo || needsProfiles || needsHeadcount ||
       !company.industry || !company.foundedYear || !company.country || company.country === 'Unknown';
 
     if (!missing) return false;
@@ -463,7 +477,6 @@ class CompanyDataFetcher {
     // Brandfetch knows is the only thing standing between the cover and a blank
     fill('city', facts?.city || brand?.city);
     fill('state', facts?.state || brand?.state);
-    fill('employees', facts?.employees || brand?.employees);
     fill('foundedYear', facts?.foundedYear || brand?.foundedYear);
     fill('industry', facts?.industry || brand?.industry);
     fill('website', facts?.website || brand?.website);
@@ -476,6 +489,19 @@ class CompanyDataFetcher {
         company.profiles = { ...(company.profiles?.toObject?.() ?? company.profiles ?? {}), [site]: url };
         changed = true;
       }
+    }
+
+    // Headcount is replaced rather than merely filled. Every account stored
+    // before this shipped holds whatever the preferred-rank read returned -
+    // Infosys was carrying its 2017 figure of 200,364 against 328,594 stated for
+    // 2026 - so a stored count with no year, or one older than what we just
+    // read, gives way. Brandfetch answers only where Wikidata was silent, and
+    // states no year, so it can fill a blank but never displace a dated figure.
+    const headcount = facts?.employees ? facts : (brand?.employees ? brand : null);
+    if (headcount && (!company.employees || (headcount.employeesAsOf || 0) > (company.employeesAsOf || 0))) {
+      company.employees = headcount.employees;
+      company.employeesAsOf = headcount.employeesAsOf;
+      changed = true;
     }
 
     const country = facts?.country || brand?.country;

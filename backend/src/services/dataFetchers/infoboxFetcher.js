@@ -33,7 +33,11 @@ const MAGNITUDES = {
   billion: 1e9,
   million: 1e6,
   thousand: 1e3,
-  // Indian companies report in crore and lakh, and Wikipedia keeps them that way
+  // Indian companies report in crore and lakh, and Wikipedia keeps them that way.
+  // The banks state a lakh crore rather than switch to trillions - HDFC Bank's
+  // revenue is written "4.95 lakh crore", and read as lakh it comes out five
+  // million times short.
+  'lakh crore': 1e12,
   crore: 1e7,
   lakh: 1e5,
 };
@@ -88,7 +92,11 @@ class InfoboxFetcher {
     text = text.replace(
       /\{\{\s*INRConvert\s*\|\s*([\d,.]+)\s*(?:\|\s*([a-z]+))?[^}]*\}\}/gi,
       (_, amount, unit) => {
-        const scale = { c: 'crore', l: 'lakh', b: 'billion', m: 'million', t: 'trillion' };
+        // The template's own unit codes, all seven of them
+        const scale = {
+          k: 'thousand', m: 'million', b: 'billion', t: 'trillion',
+          l: 'lakh', c: 'crore', lc: 'lakh crore',
+        };
         return ` INR ${amount} ${scale[String(unit || '').toLowerCase()] || ''} `;
       }
     );
@@ -104,6 +112,14 @@ class InfoboxFetcher {
     for (let pass = 0; pass < 3 && text.includes('{{'); pass++) {
       text = text.replace(/\{\{([^{}]*)\}\}/g, (_, body) => {
         const parts = body.split('|');
+
+        // A parser function states its argument after a colon rather than a
+        // pipe, so the rule below deletes it whole. `num_employees =
+        // {{formatnum:211,178}} (FY25)` is HDFC Bank's, and dropping the number
+        // left the "(FY25)" beside it to be read as the headcount - 25 people.
+        const parserFunction = /^\s*[#a-z_ ]+:([\s\S]*)$/i.exec(parts[0]);
+        if (parserFunction) return ` ${parserFunction[1]} `;
+
         return parts.length > 1 ? ` ${parts[1]} ` : ' ';
       });
     }
@@ -124,9 +140,19 @@ class InfoboxFetcher {
    * No word boundary before the digits — "FY2023" has none.
    */
   year(text) {
-    const years = [...String(text).matchAll(/\([^()]*?(?<!\d)((?:19|20)\d{2})(?!\d)[^()]*\)/g)]
+    const source = String(text);
+
+    const years = [...source.matchAll(/\([^()]*?(?<!\d)((?:19|20)\d{2})(?!\d)[^()]*\)/g)]
       .map(m => Number(m[1]));
-    return years.length ? years[years.length - 1] : null;
+    if (years.length) return years[years.length - 1];
+
+    // Indian and US filings alike write the fiscal year two digits wide, and
+    // "(FY25)" is what dates the headcount on a good half of the articles this
+    // reads. The FY is required: a bare "(25)" is a footnote marker as often as
+    // it is a year.
+    const fiscal = [...source.matchAll(/\([^()]*?FY\s?'?(\d{2})(?!\d)[^()]*\)/gi)]
+      .map(m => 2000 + Number(m[1]));
+    return fiscal.length ? fiscal[fiscal.length - 1] : null;
   }
 
   /** "US$20.942 billion (2025)" -> { value, currency, asOf } */
@@ -138,8 +164,15 @@ class InfoboxFetcher {
       mark.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     ).join('|');
 
+    // Longest first: alternation in JS takes the first branch that matches, so
+    // "lakh crore" has to be offered before "lakh" or it is read as the smaller
+    // of the two and the figure lands ten million times out
+    const magnitudes = Object.keys(MAGNITUDES)
+      .sort((a, b) => b.length - a.length)
+      .join('|');
+
     const match = new RegExp(
-      `(${marks})?\\s*([\\d][\\d,]*(?:\\.\\d+)?)\\s*(${Object.keys(MAGNITUDES).join('|')})?`,
+      `(${marks})?\\s*([\\d][\\d,]*(?:\\.\\d+)?)\\s*(${magnitudes})?`,
       'i'
     ).exec(text);
     if (!match) return null;
@@ -266,6 +299,16 @@ class InfoboxFetcher {
 
     const revenue = this.parseAmount(this.field(infobox, 'revenue'));
     const employees = this.parseCount(this.field(infobox, 'num_employees'));
+
+    // The template lets the year be stated as a field of its own rather than in
+    // brackets after the figure, and the Indian articles mostly do it that way:
+    // HDFC Bank writes `revenue_year = 2026` on its own line. Without this the
+    // figure comes back undated, and an undated figure loses to whatever stale
+    // year Wikidata happens to state - which is how the correct revenue gets
+    // parsed and then thrown away.
+    for (const [parsed, field] of [[revenue, 'revenue_year'], [employees, 'num_employees_year']]) {
+      if (parsed && !parsed.asOf) parsed.asOf = this.year(`(${this.clean(this.field(infobox, field))})`);
+    }
     const industry = this.clean(this.field(infobox, 'industry'))
       // The field is often a list; the first entry is the primary industry
       .split(/[,;]|\s{2,}/)[0]

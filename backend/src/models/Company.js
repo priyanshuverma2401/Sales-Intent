@@ -14,6 +14,11 @@ const companySchema = new mongoose.Schema({
   state: String,
   city: String,
   employees: Number,
+  // The year the headcount was reported for. Wikidata holds a figure per year
+  // and the article infobox states another, so "how many people work here" is
+  // only answerable alongside "as of when" - and it is what lets a rerun tell a
+  // fresher count from the one already stored.
+  employeesAsOf: Number,
   foundedYear: Number,
   description: String,
   logoUrl: String,
