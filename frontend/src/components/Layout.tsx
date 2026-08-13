@@ -14,10 +14,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  Sparkles,
   Sun,
 } from 'lucide-react';
-import { useAuthStore, companyProfileIncomplete, focusTopics } from '../store/authStore';
+import { useAuthStore, companyProfileIncomplete } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { inboxAPI } from '../services/api';
 import { Logo, cx } from './ui';
@@ -218,15 +217,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
-  const { high: priorityTopics, all: allTopics } = focusTopics(organization);
   // Only an owner or admin can fill the company profile in, so a member is told
   // who to ask rather than sent to a form they cannot edit.
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
   const showProfileBanner =
     companyProfileIncomplete(organization) && location.pathname !== '/settings';
 
+  // h-full, not h-screen: 100vh counts space the browser may not be showing (a
+  // horizontal scrollbar, mobile chrome), which leaves the shell taller than the
+  // window and scrollable by exactly that sliver.
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-full overflow-hidden bg-slate-50">
       {/* ---------------- Sidebar ---------------- */}
       <aside
         className={cx(
@@ -261,7 +262,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <nav className="relative flex-1 space-y-5 overflow-y-auto px-3 py-3 scrollbar-none">
+        <nav className="relative flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-3 scrollbar-none">
           {NAV_GROUPS.filter((group) => !group.managerOnly || isAdmin).map((group) => (
             <div key={group.label} className="space-y-1">
               {!collapsed && (
@@ -282,51 +283,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* The company's monitored topics - what every report is written around.
-            High-priority ones lead, because those are the ones that steer it. */}
-        {!collapsed && (
-          <div className="relative mx-3 mb-3 overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] p-3.5 backdrop-blur-sm">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-brand-500/25 blur-2xl"
-            />
-            <div className="relative mb-2.5 flex items-center gap-1.5 text-2xs font-bold uppercase tracking-[0.13em] text-brand-300">
-              <Sparkles size={12} /> What we look for
-            </div>
-            {allTopics.length ? (
-              <div className="relative flex flex-wrap gap-1">
-                {allTopics.slice(0, 4).map((topic) => {
-                  const priority = priorityTopics.includes(topic);
-                  return (
-                    <span
-                      key={topic}
-                      title={priority ? 'Top priority' : undefined}
-                      className={cx(
-                        'rounded-md px-1.5 py-0.5 text-2xs font-medium ring-1 ring-inset transition-transform duration-200 hover:scale-105',
-                        priority
-                          ? 'bg-emerald-500/20 text-emerald-200 ring-emerald-400/30'
-                          : 'bg-brand-500/15 text-brand-100 ring-brand-400/20'
-                      )}
-                    >
-                      {topic}
-                    </span>
-                  );
-                })}
-              </div>
-            ) : isAdmin ? (
-              <Link
-                to="/settings"
-                className="relative text-2xs font-medium text-amber-300 hover:underline"
-              >
-                Not set yet — tell us what to watch for
-              </Link>
-            ) : (
-              <p className="relative text-2xs font-medium text-amber-300">
-                Not set yet — ask your admin what to watch for
-              </p>
-            )}
-          </div>
-        )}
 
         <div className="relative border-t border-white/10 p-3">
           <NavItem
@@ -445,7 +401,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="page-wash min-w-0 flex-1 overflow-y-auto">
+        <main className="page-wash min-w-0 flex-1 overflow-y-auto overscroll-contain">
           {showProfileBanner && (
             <div className="no-print border-b border-amber-200 bg-amber-50 px-6 py-3">
               <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-3 gap-y-1 text-sm">

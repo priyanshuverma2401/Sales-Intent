@@ -29,7 +29,7 @@ export default function AuthShell({
   };
 
   return (
-    <div className="flex min-h-screen bg-surface">
+    <div className="flex h-full overflow-hidden bg-surface">
       {/* Brand rail */}
       <aside className="relative hidden w-[46%] max-w-[600px] flex-col justify-between overflow-hidden bg-navy-900 px-12 py-12 lg:flex">
         {/* Slow-drifting colour behind the copy. Two blurred orbs plus a faint
@@ -90,7 +90,7 @@ export default function AuthShell({
       </aside>
 
       {/* Form side */}
-      <main className="page-wash flex flex-1 items-start justify-center overflow-y-auto px-5 py-12 sm:px-10">
+      <main className="page-wash flex flex-1 items-start justify-center overflow-y-auto overscroll-contain px-5 py-12 sm:px-10">
         <div className={wide ? 'w-full max-w-2xl' : 'w-full max-w-md'}>
           <div className="mb-8 lg:hidden">
             <Logo />

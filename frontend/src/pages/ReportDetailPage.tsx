@@ -243,7 +243,9 @@ export default function ReportDetailPage() {
     try {
       const res = await reportsAPI.generate(report.companyId);
       setRegen({ id: res.data.reportId, step: 'Getting started', percent: 4 });
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      // The shell scrolls, not the window - the progress strip sits at the top
+      // of the page column, so that is what has to come back into view.
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError(apiError(err, 'We could not start a new report'));
     }

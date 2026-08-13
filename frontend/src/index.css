@@ -104,6 +104,16 @@
     height: 100%;
   }
 
+  /* The shell owns the scrolling - the main column scrolls, the window never
+     does. Without this, any stray overflow gives the window a scrollbar of its
+     own, and carrying a scroll past the end of a list drags the whole app up
+     and leaves a band of blank page underneath it. */
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   body {
     margin: 0;
     @apply bg-slate-50 text-ink antialiased;
@@ -533,6 +543,20 @@
 
   body {
     background: #fff;
+  }
+  /* Paper has no viewport to clip to: hand the document its height back, or a
+     report prints as the single screenful the shell was holding. */
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+  #root > div,
+  #root main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
   /* Ink and paper only: washes and animations have no place in an export. */
   .page-wash {

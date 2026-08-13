@@ -28,7 +28,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // while this is still in flight logged the user out on every page refresh.
   if (isBootstrapping) {
     return (
-      <div className="page-wash flex min-h-screen flex-col items-center justify-center gap-5">
+      <div className="page-wash flex h-full flex-col items-center justify-center gap-5">
         <div className="animate-fade-in-up">
           <Logo />
         </div>
