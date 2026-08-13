@@ -39,6 +39,10 @@ interface ReportSummary {
   status: 'pending' | 'complete' | 'failed';
   progress?: { step?: string; percent?: number };
   error?: string;
+  // A rewrite of a finished report. There is one report per account per team,
+  // so refreshing one edits it rather than adding a second card next to it -
+  // and it stays 'complete' and readable the whole time.
+  refresh?: { status?: 'pending' | 'failed'; step?: string; percent?: number };
   score?: { value?: number; band?: string; summary?: string };
   context?: { sellerName?: string; priorityTopics?: string[]; topics?: string[] };
   fastFacts?: { industry?: string; headquarters?: string };
@@ -123,7 +127,9 @@ export default function ReportsPage() {
   }, [loadOptions]);
 
   // Reports generate asynchronously, so keep checking while any are pending
-  const hasPending = reports.some((r) => r.status === 'pending');
+  const hasPending = reports.some(
+    (r) => r.status === 'pending' || r.refresh?.status === 'pending'
+  );
   usePoll(() => load(true), { active: hasPending });
 
   const filtersActive = Boolean(query.trim()) || authorId !== 'all' || industry !== 'all';
@@ -397,6 +403,17 @@ export default function ReportsPage() {
                     </div>
                   )}
 
+                  {/* Being rewritten with fresh research. What is summarised
+                      above is the previous version and stays readable. */}
+                  {report.status !== 'pending' && report.refresh?.status === 'pending' && (
+                    <div className="mt-4">
+                      <ProgressBar percent={report.refresh.percent} />
+                      <p className="mt-2 text-2xs font-medium text-brand-600">
+                        Refreshing — {report.refresh.step || 'getting started'}
+                      </p>
+                    </div>
+                  )}
+
                   {report.status === 'failed' && (
                     <p className="mt-3 line-clamp-2 rounded-lg bg-red-50 px-3 py-2 text-[13px] text-red-700">
                       {report.error || 'This report did not finish'}
@@ -492,6 +509,8 @@ export default function ReportsPage() {
           load(true);
           loadOptions();
 
+          // No second card ever appears for an account the team already has -
+          // the report it already holds is rewritten and opened instead
           const added = alreadyTracked
             ? `${companyName} is already tracked${addedByName ? ` (added by ${addedByName})` : ''} — refreshing it`
             : `${companyName} added`;

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "dedupe-reports": "node src/scripts/dedupeReports.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

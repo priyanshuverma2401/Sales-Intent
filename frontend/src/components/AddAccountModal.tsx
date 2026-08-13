@@ -82,13 +82,16 @@ export default function AddAccountModal({
   open: boolean;
   onClose: () => void;
   // `alreadyTracked` is how the caller tells "we added this" apart from "the
-  // team already had this, so we refreshed it and are writing a fresh report".
+  // team already had this, so we refreshed it". `reportRefreshing` says the
+  // team's existing report is being rewritten rather than a new one written -
+  // no second copy is ever filed for an account somebody has already researched.
   onAdded: (result: {
     companyName: string;
     reportId?: string | null;
     reportError?: any;
     alreadyTracked?: boolean;
     addedByName?: string | null;
+    reportRefreshing?: boolean;
   }) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -168,6 +171,7 @@ export default function AddAccountModal({
         reportError: res.data?.reportError,
         alreadyTracked: res.data?.alreadyTracked,
         addedByName: res.data?.addedByName,
+        reportRefreshing: res.data?.reportRefreshing,
       });
       onClose();
     } catch (err) {

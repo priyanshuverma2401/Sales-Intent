@@ -53,6 +53,11 @@ function canDelete(report, req, accountAddedBy) {
 
 // ---------------------------------------------------------------------------
 // Generate a report for one prospect
+//
+// One report per account per tenant: if the team already has one, this rewrites
+// it rather than filing a second copy alongside it. The response says which
+// happened, because "we are writing your report" and "we are bringing the one
+// you are looking at up to date" are different promises.
 // ---------------------------------------------------------------------------
 router.post('/:companyId', authenticate, async (req, res) => {
   try {
@@ -67,10 +72,22 @@ router.post('/:companyId', authenticate, async (req, res) => {
       company,
     });
 
+    // Set when a run was already under way and this request joined it instead
+    // of starting a second one
+    const joined = Boolean(report.joinedExistingRun);
+    const refreshing = report.refresh?.status === 'pending';
+
     res.status(202).json({
-      message: 'Report generation started',
+      message: refreshing
+        ? 'Refreshing the existing report'
+        : joined
+          ? 'This report is already being written'
+          : 'Report generation started',
       reportId: report._id,
-      status: 'pending',
+      status: report.status,
+      // The client keeps the finished report on screen while this is true
+      refreshing,
+      joinedExistingRun: joined,
     });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message, code: error.code });
@@ -174,6 +191,9 @@ router.get('/', authenticate, async (req, res) => {
         'score.value', 'score.band', 'score.summary',
         'context', 'generatedAt', 'aiModel', 'pdfFileName', 'userId',
         'fastFacts.industry', 'fastFacts.logoUrl', 'fastFacts.headquarters',
+        // A rewrite in flight. The report stays 'complete' and readable while
+        // it runs, so without this a card being refreshed looks idle.
+        'refresh.status', 'refresh.step', 'refresh.percent',
       ].join(' '))
       .populate('userId', 'firstName lastName email')
       .sort({ generatedAt: -1 })

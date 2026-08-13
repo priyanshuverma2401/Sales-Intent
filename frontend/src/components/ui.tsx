@@ -189,21 +189,27 @@ export function Alert({
   children,
   onDismiss,
 }: {
-  tone?: 'info' | 'error' | 'success';
+  // 'warning' is for something that failed without costing the reader anything -
+  // a refresh that did not land over a report they can still read. Red would
+  // claim more than happened.
+  tone?: 'info' | 'warning' | 'error' | 'success';
   children: React.ReactNode;
   onDismiss?: () => void;
 }) {
   const tones = {
     info: 'border-brand-200 bg-brand-50 text-brand-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-800',
     error: 'border-red-200 bg-red-50 text-red-700',
     success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   };
   const chips = {
     info: 'bg-brand-500/15 text-brand-600',
+    warning: 'bg-amber-500/15 text-amber-600',
     error: 'bg-red-500/15 text-red-600',
     success: 'bg-emerald-500/15 text-emerald-600',
   };
-  const Icon = tone === 'error' ? AlertCircle : tone === 'success' ? Check : Info;
+  const Icon =
+    tone === 'error' || tone === 'warning' ? AlertCircle : tone === 'success' ? Check : Info;
 
   return (
     <div

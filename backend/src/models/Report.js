@@ -110,10 +110,37 @@ const reportSchema = new mongoose.Schema({
   companyName: String,
   ticker: String,
 
-  // Reports are personal: the same prospect produces a different report for a
-  // different seller, because the lens changes.
+  // The report belongs to the tenant, not to the seat. Every report in an
+  // organization is written through the same lens - the company profile - so a
+  // second person researching the same prospect would produce the same document
+  // twice. There is one report per account per tenant, and re-running it
+  // rewrites that one; `userId` is whoever first asked for it.
   organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+
+  // --- An in-place rewrite currently running --------------------------------
+  //
+  // Re-running a finished report edits that report rather than filing a second
+  // one, but a rep who pressed Refresh on the way into a call still needs what
+  // is on screen. So the finished content and `status` are left alone until the
+  // new pass lands, and the progress of that pass is tracked here instead.
+  //
+  // The same field is what makes a failed rewrite harmless: the previous report
+  // is still the report, and the failure is reported beside it rather than
+  // replacing it.
+  //
+  // Absent on a report that is not being rewritten. Never set on a report that
+  // has no finished content to protect - those simply go back to 'pending'.
+  refresh: {
+    status: { type: String, enum: ['pending', 'failed'] },
+    step: String,
+    percent: Number,
+    startedAt: Date,
+    // Who asked for it. The rewrite is filed against the original author, so
+    // without this the audit trail could not say who set it off.
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    error: String,
+  },
 
   // Frozen copy of the company profile the report was written from, so an old
   // report still explains itself after an admin edits that profile.
@@ -365,5 +392,10 @@ const reportSchema = new mongoose.Schema({
 });
 
 reportSchema.index({ userId: 1, generatedAt: -1 });
+// The lookup behind "does this tenant already have a report on this account?",
+// run on every add and every re-run. Not declared unique: reports written
+// before one-per-account existed are still in the collection until
+// scripts/dedupeReports.js has been run against it.
+reportSchema.index({ organizationId: 1, companyId: 1 });
 
 module.exports = mongoose.model('Report', reportSchema);

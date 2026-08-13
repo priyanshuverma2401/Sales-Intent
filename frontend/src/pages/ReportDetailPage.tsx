@@ -125,9 +125,11 @@ export default function ReportDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
-  // The replacement being written, while this one stays on screen. Null except
-  // between pressing "Write a new one" and the new report landing.
-  const [regen, setRegen] = useState<{ id: string; step?: string; percent?: number } | null>(null);
+  // Covers the request that asks for a rewrite, and nothing after it. A rewrite
+  // now edits this report rather than filing a new one, so once the server has
+  // accepted it the progress arrives on the same document this page is already
+  // loading - there is no second report to follow.
+  const [restarting, setRestarting] = useState(false);
   const [activeChapter, setActiveChapter] = useState<string>(CHAPTERS[0].id);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [descriptionClamped, setDescriptionClamped] = useState(false);
@@ -157,9 +159,15 @@ export default function ReportDetailPage() {
     load();
   }, [load]);
 
+  // A rewrite of a finished report, still running. The report keeps its content
+  // and its 'complete' status throughout, so this is the only thing that says
+  // the pipeline is working.
+  const refreshing = report?.refresh?.status === 'pending';
+
   // Landing here straight after "Add account" means the report is still being
-  // written, so keep checking until the pipeline finishes.
-  usePoll(() => load(true), { active: report?.status === 'pending' });
+  // written, so keep checking until the pipeline finishes. Same for a rewrite,
+  // which lands as new content under the reader rather than as a new page.
+  usePoll(() => load(true), { active: report?.status === 'pending' || refreshing });
 
   // Keeps the jump bar showing where you are on what is now a long page.
   useEffect(() => {
@@ -229,65 +237,48 @@ export default function ReportDetailPage() {
   }, [report]);
 
   /**
-   * Write a new report on this account.
+   * Rewrite this report with the latest research.
    *
-   * Regenerating produces a new report rather than editing this one, so the
-   * page deliberately does not empty itself: a rep who pressed the button on
-   * the way into a call still needs what is on screen. The old report stays
-   * fully readable and is swapped for the new one only once it has finished.
+   * There is one report per account per team, so this edits this report rather
+   * than filing a second one beside it — that is what used to leave three
+   * near-identical reports on one prospect in the list.
+   *
+   * The page deliberately does not empty itself while it runs: a rep who
+   * pressed the button on the way into a call still needs what is on screen.
+   * Everything below stays exactly as it was, and is replaced in place only
+   * once the new pass has finished. If it fails, what is on screen is still the
+   * report.
    */
-  const writeNewOne = async () => {
+  const refreshReport = async () => {
     if (!report?.companyId) return;
     setError('');
+    setRestarting(true);
 
     try {
       const res = await reportsAPI.generate(report.companyId);
-      setRegen({ id: res.data.reportId, step: 'Getting started', percent: 4 });
+
+      // Defensive: this account is the one this report is on, so the server
+      // returns this same report. A different id could only mean the account
+      // was re-pointed underneath us, and following it beats stranding the user
+      // on a page nothing is updating.
+      if (res.data?.reportId && res.data.reportId !== id) {
+        navigate(`/reports/${res.data.reportId}`);
+        return;
+      }
+
+      // The refresh marker is written before the response is sent, so this pass
+      // is what puts the strip on screen - no separate "starting" state needed.
+      await load(true);
+
       // The shell scrolls, not the window - the progress strip sits at the top
       // of the page column, so that is what has to come back into view.
       document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      setError(apiError(err, 'We could not start a new report'));
+      setError(apiError(err, 'We could not refresh this report'));
+    } finally {
+      setRestarting(false);
     }
   };
-
-  // Follow the replacement until it lands. Nothing here touches `report`, so
-  // what the reader is looking at cannot change underneath them mid-sentence.
-  const pendingId = regen?.id ?? null;
-
-  const checkReplacement = useCallback(async () => {
-    if (!pendingId) return;
-
-    try {
-      const res = await reportsAPI.getReport(pendingId);
-      const next = res.data;
-
-      if (next.status === 'complete') {
-        navigate(`/reports/${next._id}`);
-      } else if (next.status === 'failed') {
-        setRegen(null);
-        setError(
-          next.error || 'The new report did not finish. The one you were reading is unchanged.'
-        );
-      } else {
-        setRegen(current =>
-          current && current.id === pendingId
-            ? { ...current, step: next.progress?.step, percent: next.progress?.percent }
-            : current
-        );
-      }
-    } catch (_) {
-      // A dropped poll is not worth a banner - the next one will land
-    }
-  }, [pendingId, navigate]);
-
-  usePoll(checkReplacement, { active: Boolean(pendingId) });
-
-  // Navigating to the finished report keeps this component mounted, so the
-  // "writing a new one" state has to be dropped when the id under it changes.
-  useEffect(() => {
-    setRegen(null);
-  }, [id]);
 
   const download = async () => {
     if (!id) return;
@@ -332,10 +323,9 @@ export default function ReportDetailPage() {
     .filter((part: string) => part && part.toLowerCase() !== 'unknown')
     .join(', ');
 
-  // Regenerating writes a fresh report rather than editing this one, so for any
-  // given report the two are usually minutes apart - lastUpdatedAt is the moment
-  // the pipeline finished writing it, and is absent only on reports that failed
-  // part-way through.
+  // When the pipeline last finished writing this report. Refreshing rewrites
+  // the same report, so on one that has been refreshed this is the only date
+  // that says how current what is on the page actually is.
   const lastRefreshed = report.lastUpdatedAt || report.generatedAt;
 
   const context = report.context || {};
@@ -405,7 +395,14 @@ export default function ReportDetailPage() {
               onClick={async () => {
                 try {
                   const res = await reportsAPI.generate(report.companyId);
-                  navigate(`/reports/${res.data.reportId}`);
+                  // A report that never finished is re-run in place rather than
+                  // replaced, so this is normally the same id - reloading is
+                  // what moves the page on, not navigating.
+                  if (res.data?.reportId && res.data.reportId !== id) {
+                    navigate(`/reports/${res.data.reportId}`);
+                    return;
+                  }
+                  await load(true);
                 } catch (err) {
                   setError(apiError(err, 'Could not restart the report'));
                 }
@@ -436,11 +433,11 @@ export default function ReportDetailPage() {
             variant="secondary"
             size="sm"
             icon={RefreshCw}
-            loading={Boolean(regen)}
-            disabled={Boolean(regen)}
-            onClick={writeNewOne}
+            loading={restarting || refreshing}
+            disabled={restarting || refreshing}
+            onClick={refreshReport}
           >
-            {regen ? 'Writing…' : 'Write a new one'}
+            {restarting || refreshing ? 'Refreshing…' : 'Refresh this report'}
           </Button>
           <Button size="sm" icon={Download} loading={downloading} onClick={download}>
             Download PDF
@@ -448,9 +445,9 @@ export default function ReportDetailPage() {
         </div>
       </div>
 
-      {/* The new report being written. Loud on purpose - it has to be obvious
-          that what is below is the previous version, not a half-written one. */}
-      {regen && (
+      {/* The rewrite in progress. Loud on purpose - it has to be obvious that
+          what is below is the previous version, not a half-written one. */}
+      {(restarting || refreshing) && (
         <div className="no-print shimmer mb-5 animate-slide-down rounded-2xl border border-brand-200 bg-surface shadow-card">
           <div
             aria-hidden
@@ -475,18 +472,18 @@ export default function ReportDetailPage() {
 
             <div className="min-w-0 flex-1">
               <p className="text-[15px] font-bold tracking-tight text-ink">
-                Writing a fresh {report.companyName} report
+                Refreshing the {report.companyName} report
               </p>
               <p className="mt-0.5 text-[13px] leading-relaxed text-ink-muted">
-                {regen.step || 'Getting started'} — everything below stays exactly as it is until
-                the new one is ready.
+                {report.refresh?.step || 'Getting started'} — everything below stays exactly as it
+                is until the new research is ready.
               </p>
 
               <div className="mt-2.5 flex items-center gap-3">
-                <ProgressBar percent={regen.percent} className="h-1.5 flex-1" />
-                {typeof regen.percent === 'number' && regen.percent > 0 && (
+                <ProgressBar percent={report.refresh?.percent} className="h-1.5 flex-1" />
+                {typeof report.refresh?.percent === 'number' && report.refresh.percent > 0 && (
                   <span className="shrink-0 text-2xs font-bold tabular-nums text-brand-600">
-                    {Math.min(99, Math.round(regen.percent))}%
+                    {Math.min(99, Math.round(report.refresh.percent))}%
                   </span>
                 )}
               </div>
@@ -499,6 +496,20 @@ export default function ReportDetailPage() {
         <div className="no-print mb-4">
           <Alert tone="error" onDismiss={() => setError('')}>
             {error}
+          </Alert>
+        </div>
+      )}
+
+      {/* A refresh that did not land. Said as a warning rather than an error
+          page, because nothing was lost — the report below is the one the team
+          had before, and it is still the best thing we have on this account. */}
+      {report.refresh?.status === 'failed' && !restarting && (
+        <div className="no-print mb-4">
+          <Alert tone="warning">
+            {report.refresh.error ||
+              'The last refresh did not finish.'}{' '}
+            What you are reading is the previous report, written{' '}
+            {lastRefreshed ? day(lastRefreshed) : 'earlier'}.
           </Alert>
         </div>
       )}

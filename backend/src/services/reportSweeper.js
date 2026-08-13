@@ -26,28 +26,57 @@ const SWEEP_EVERY_MS = Number(process.env.REPORT_SWEEP_INTERVAL_MS) || 5 * 60 * 
 const STALE_MESSAGE =
   'Generation was interrupted before it finished — most likely the server restarted or was redeployed. Run the report again.';
 
+// The same thing happening to a rewrite of a report that already has content.
+// Worded for a reader who can still see that content: nothing was lost, the
+// refresh simply did not land.
+const STALE_REFRESH_MESSAGE =
+  'The refresh was interrupted before it finished — most likely the server restarted or was redeployed. What you are reading is the previous report. Run it again to bring it up to date.';
+
 let timer = null;
 
-/** Marks every report that has been 'pending' longer than the threshold as failed. */
+/**
+ * Marks every run that has been going longer than the threshold as failed.
+ *
+ * Two shapes of run to recover: a report still being written for the first
+ * time, and a rewrite of a report that already has content. Only the first
+ * fails the report itself - a rewrite that never landed leaves the previous
+ * report exactly as it was and says so on `refresh`.
+ */
 async function sweep({ quiet = false } = {}) {
   const cutoff = new Date(Date.now() - STALE_AFTER_MS);
 
   try {
-    const result = await Report.updateMany(
-      { status: 'pending', generatedAt: { $lt: cutoff } },
-      {
-        $set: {
-          status: 'failed',
-          error: STALE_MESSAGE,
-          progress: { step: 'Interrupted', percent: 100 },
-        },
-      }
-    );
+    const [first, refreshes] = await Promise.all([
+      Report.updateMany(
+        { status: 'pending', generatedAt: { $lt: cutoff } },
+        {
+          $set: {
+            status: 'failed',
+            error: STALE_MESSAGE,
+            progress: { step: 'Interrupted', percent: 100 },
+          },
+        }
+      ),
+      Report.updateMany(
+        { 'refresh.status': 'pending', 'refresh.startedAt': { $lt: cutoff } },
+        {
+          $set: {
+            'refresh.status': 'failed',
+            'refresh.error': STALE_REFRESH_MESSAGE,
+            'refresh.step': 'Interrupted',
+            'refresh.percent': 100,
+          },
+        }
+      ),
+    ]);
 
-    const count = result.modifiedCount || 0;
+    const count = (first.modifiedCount || 0) + (refreshes.modifiedCount || 0);
 
     if (count > 0) {
-      console.warn(`🧹 Recovered ${count} report(s) left stuck mid-generation.`);
+      console.warn(
+        `🧹 Recovered ${count} report(s) left stuck mid-generation` +
+        `${refreshes.modifiedCount ? ` (${refreshes.modifiedCount} of them a refresh)` : ''}.`
+      );
     } else if (!quiet) {
       console.log('🧹 Report sweep: nothing stuck.');
     }

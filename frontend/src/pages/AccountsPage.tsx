@@ -61,6 +61,9 @@ interface Account {
   tags?: AccountTags;
   financials?: { marketCap?: number; peRatio?: number };
   stock?: { currentPrice?: number };
+  // The team's report on this account - there is one per account, whoever
+  // generated it, so a colleague's research shows up here rather than the row
+  // reading as unresearched.
   latestReport?: {
     _id: string;
     status: 'pending' | 'complete' | 'failed';
@@ -69,6 +72,10 @@ interface Account {
     score?: number;
     band?: string;
     generatedAt?: string;
+    // A finished report being rewritten. It stays 'complete' and readable
+    // throughout, so this is the only thing that says work is under way.
+    refreshing?: boolean;
+    refreshProgress?: number;
   } | null;
 }
 
@@ -129,8 +136,12 @@ export default function AccountsPage() {
     load();
   }, [load]);
 
-  // Reports generate in the background, so keep checking while any are running
-  const hasPending = accounts.some((a) => a.latestReport?.status === 'pending');
+  // Reports generate in the background, so keep checking while any are running -
+  // including a rewrite of one that is already finished, which leaves the report
+  // 'complete' the whole time it runs
+  const hasPending = accounts.some(
+    (a) => a.latestReport?.status === 'pending' || a.latestReport?.refreshing
+  );
   usePoll(() => load(true), { active: hasPending });
 
   const refresh = async (account: Account) => {
@@ -463,9 +474,13 @@ export default function AccountsPage() {
                   </div>
                 </div>
 
-                {/* Progress strip while a report builds */}
+                {/* Progress strip while a report builds, or while the one that
+                    is already there is being rewritten */}
                 {report?.status === 'pending' && (
                   <ProgressBar percent={report.progress?.percent} className="h-1 rounded-none" />
+                )}
+                {report?.status !== 'pending' && report?.refreshing && (
+                  <ProgressBar percent={report.refreshProgress} className="h-1 rounded-none" />
                 )}
               </div>
             );
@@ -489,11 +504,19 @@ export default function AccountsPage() {
       <AddAccountModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAdded={({ companyName, reportId, reportError, alreadyTracked, addedByName }) => {
+        onAdded={({
+          companyName,
+          reportId,
+          reportError,
+          alreadyTracked,
+          addedByName,
+          reportRefreshing,
+        }) => {
           load(true);
 
           // Adding a company the team already has is not an error and not a
-          // second copy - it refreshes the account and writes a fresh report.
+          // second copy of anything - the account and its report are one shared
+          // thing, so this brings them up to date instead.
           const added = alreadyTracked
             ? `${companyName} is already tracked${addedByName ? ` (added by ${addedByName})` : ''} — refreshing it`
             : `${companyName} added`;
@@ -506,7 +529,9 @@ export default function AccountsPage() {
           } else if (reportId) {
             setMessage({
               tone: 'info',
-              text: `${added} — we are writing a new report now.`,
+              text: reportRefreshing
+                ? `${added} — we are rewriting the team's report on it with the latest research.`
+                : `${added} — we are writing a new report now.`,
             });
           } else {
             setMessage({ tone: 'success', text: `${added}.` });

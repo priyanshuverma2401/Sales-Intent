@@ -380,6 +380,9 @@ router.post('/', authenticate, async (req, res) => {
 
     // The point of adding an account is the report, so start it here rather
     // than making the user press a second button.
+    //
+    // If the team already has a report on this account, this refreshes that one
+    // rather than filing a second copy of it - see reportService.start.
     let report = null;
     let reportError = null;
 
@@ -406,8 +409,13 @@ router.post('/', authenticate, async (req, res) => {
     res.status(alreadyTracked ? 200 : 201).json({
       company,
       reportId: report?._id || null,
-      reportStatus: report ? 'pending' : null,
+      reportStatus: report?.status || null,
       reportError,
+      // The team's existing report is being rewritten rather than a new one
+      // written, so the client can open it and keep it readable meanwhile
+      reportRefreshing: report?.refresh?.status === 'pending',
+      // A colleague's run was already under way and this add joined it
+      reportAlreadyRunning: Boolean(report?.joinedExistingRun),
       // The client needs to tell the two apart: adding a new account and
       // refreshing one the team already has read very differently to a user.
       alreadyTracked,

@@ -38,13 +38,23 @@ router.get('/', authenticate, async (req, res) => {
 
     const companyIds = entries.map(w => w.companyId._id);
 
+    // Reports belong to the tenant, not to the seat: there is one per account,
+    // and whoever generated it, it is the report for this row. Scoping this to
+    // `userId` was what made a colleague's account look unresearched and sent
+    // the next person to press Generate on it - which is how the duplicates got
+    // there in the first place. The author's own work is unioned in for reports
+    // written before organizationId was stored.
+    const reportScope = req.organization?._id
+      ? { $or: [{ organizationId: req.organization._id }, { userId: user._id }] }
+      : { userId: user._id };
+
     const [counts, reports] = await Promise.all([
       Signal.aggregate([
         { $match: { companyId: { $in: companyIds } } },
         { $group: { _id: '$companyId', count: { $sum: 1 } } },
       ]),
-      Report.find({ userId: user._id, companyId: { $in: companyIds } })
-        .select('companyId status progress error score.value score.band generatedAt')
+      Report.find({ $and: [reportScope, { companyId: { $in: companyIds } }] })
+        .select('companyId status progress error score.value score.band generatedAt refresh.status refresh.step refresh.percent')
         .sort({ generatedAt: -1 }),
     ]);
 
@@ -99,6 +109,11 @@ router.get('/', authenticate, async (req, res) => {
               score: report.score?.value,
               band: report.score?.band,
               generatedAt: report.generatedAt,
+              // A finished report being rewritten stays 'complete' and readable,
+              // so this is the only thing that tells the board it is working
+              refreshing: report.refresh?.status === 'pending',
+              refreshProgress:
+                report.refresh?.status === 'pending' ? report.refresh.percent : undefined,
             }
           : null,
       };
